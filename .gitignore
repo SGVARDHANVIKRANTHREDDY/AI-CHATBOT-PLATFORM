@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Vector DB
+*.index
+*.jsonl
+
+# Memory files
+data/vector_index/memory/
+
+# Environment variables
+.env
+
+# Build
+dist/
+build/
+
+# Testing cache
+.pytest_cache/
+
+# VSCode
+.vscode/
