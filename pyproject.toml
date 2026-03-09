@@ -1,0 +1,69 @@
+[project]
+name = "ai-chatbot-platform"
+version = "1.0.0"
+requires-python = ">=3.12"
+
+# ── Ruff ──────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["app", "workers", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "S",    # flake8-bandit
+    "T20",  # flake8-print
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # line length (handled by formatter)
+    "S101",   # assert usage (needed in tests)
+    "S104",   # binding to 0.0.0.0 (expected in containers)
+    "S603",   # subprocess call (used in plugin sandbox)
+    "S607",   # partial executable path
+    "B008",   # function calls in defaults (FastAPI Depends)
+    "RUF012", # mutable class variable annotations
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "T20"]
+"app/plugins/**" = ["S603", "S607"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ── mypy ──────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = ["tests/", "workers/"]
+
+# ── bandit ────────────────────────────────────────────────────────
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "node_modules"]
+skips = [
+    "B101",  # assert (tests)
+    "B104",  # binding to 0.0.0.0
+    "B603",  # subprocess (plugin sandbox)
+]
+
+# ── pytest ────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+markers = [
+    "integration: optional integration tests (network/local services)",
+]
+filterwarnings = [
+    "ignore:numpy\\.core\\._multiarray_umath is deprecated.*:DeprecationWarning",
+]

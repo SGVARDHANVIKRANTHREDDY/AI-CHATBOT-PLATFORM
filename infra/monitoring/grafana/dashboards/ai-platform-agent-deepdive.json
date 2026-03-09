@@ -1,0 +1,87 @@
+{
+  "title": "AI Platform — Agent Deep-Dive",
+  "uid": "ai-platform-agent-deepdive",
+  "schemaVersion": 39,
+  "tags": ["ai-platform", "agents"],
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Agent Planning Duration Distribution",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(agent_execution_time_seconds_bucket{agent_type=\"planner\"}[5m])) by (le))",
+          "legendFormat": "p50 planner"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(agent_execution_time_seconds_bucket{agent_type=\"planner\"}[5m])) by (le))",
+          "legendFormat": "p95 planner"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Full Loop Execution Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(agent_execution_time_seconds_bucket{agent_type=\"full_loop\"}[5m])) by (le))",
+          "legendFormat": "p95 full_loop"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Tool Calls by Name (rate/5m)",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(tool_call_count_total[5m])) by (tool_name) * 300",
+          "legendFormat": "{{tool_name}}"
+        }
+      ]
+    },
+    {
+      "title": "Tool Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(tool_call_count_total{status=\"error\"}[5m])) by (tool_name) / sum(rate(tool_call_count_total[5m])) by (tool_name)",
+          "legendFormat": "{{tool_name}} error %"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+    },
+    {
+      "title": "RAG Retrieval Latency (vector search)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vector_search_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vector_search_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Watchdog Terminations (1h)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(increase(watchdog_terminations_total[1h])) by (reason)",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    }
+  ]
+}

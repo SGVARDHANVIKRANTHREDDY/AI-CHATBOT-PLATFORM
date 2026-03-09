@@ -1,0 +1,17 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/ai-platform/*.log
+    json.keys_under_root: true
+    json.overwrite_keys: true
+    json.add_error_key: true
+    json.expand_keys: true
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "ai-platform-logs-%{+yyyy.MM.dd}"
+
+setup.template.name: "ai-platform-logs"
+setup.template.pattern: "ai-platform-logs-*"
+setup.ilm.enabled: false
