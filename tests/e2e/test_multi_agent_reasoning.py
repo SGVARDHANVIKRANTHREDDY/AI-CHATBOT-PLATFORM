@@ -5,20 +5,20 @@ Tests the full agent reasoning loop with mocked LLM provider,
 verifying that planning → graph execution → synthesis → critic
 chain works end-to-end, including reliability wrappers.
 """
+
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any, Dict
-
-from app.reliability.circuit_breaker import CircuitBreaker, CircuitState, CircuitOpenError
-from app.reliability.retry_policy import RetryPolicy, RetryExhaustedError
-from app.reliability.timeout_controller import TimeoutController
+from app.reliability.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 from app.reliability.failure_tracker import FailureTracker
-
+from app.reliability.retry_policy import RetryExhaustedError, RetryPolicy
+from app.reliability.timeout_controller import TimeoutController
 
 # ── Fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def failure_tracker():
@@ -53,12 +53,14 @@ def timeout_controller():
 
 # ── Circuit Breaker Tests ────────────────────────────────────────
 
+
 class TestCircuitBreaker:
     """Tests for the CircuitBreaker reliability primitive."""
 
     @pytest.mark.asyncio
     async def test_closed_state_passes_calls(self, circuit_breaker):
         """Calls pass through when circuit is CLOSED."""
+
         async def success():
             return "ok"
 
@@ -69,6 +71,7 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_transitions_to_open_on_failures(self, circuit_breaker):
         """Circuit opens after failure_threshold failures."""
+
         async def failing():
             raise ConnectionError("provider down")
 
@@ -84,8 +87,10 @@ class TestCircuitBreaker:
         circuit_breaker.force_open()
 
         with pytest.raises(CircuitOpenError) as exc_info:
+
             async def success():
                 return "ok"
+
             await circuit_breaker.call(success)
 
         assert exc_info.value.component == "test_cb"
@@ -93,6 +98,7 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_open_circuit_uses_fallback(self):
         """When a fallback is set, open circuit invokes it instead of raising."""
+
         async def my_fallback(*args, **kwargs):
             return "fallback_result"
 
@@ -133,12 +139,14 @@ class TestCircuitBreaker:
 
 # ── Retry Policy Tests ───────────────────────────────────────────
 
+
 class TestRetryPolicy:
     """Tests for the RetryPolicy with exponential backoff."""
 
     @pytest.mark.asyncio
     async def test_success_on_first_attempt(self, retry_policy):
         """No retries needed when call succeeds."""
+
         async def success():
             return "ok"
 
@@ -164,6 +172,7 @@ class TestRetryPolicy:
     @pytest.mark.asyncio
     async def test_exhausts_retries(self, retry_policy):
         """Raises RetryExhaustedError after max_retries."""
+
         async def always_fails():
             raise ConnectionError("permanent")
 
@@ -175,6 +184,7 @@ class TestRetryPolicy:
     @pytest.mark.asyncio
     async def test_no_retry_on_non_retryable(self, retry_policy):
         """Non-retryable exceptions are raised immediately."""
+
         async def type_error():
             raise TypeError("not retryable")
 
@@ -184,12 +194,14 @@ class TestRetryPolicy:
 
 # ── Timeout Controller Tests ─────────────────────────────────────
 
+
 class TestTimeoutController:
     """Tests for the TimeoutController."""
 
     @pytest.mark.asyncio
     async def test_completes_within_timeout(self, timeout_controller):
         """Fast calls complete normally."""
+
         async def fast():
             return "fast"
 
@@ -206,6 +218,7 @@ class TestTimeoutController:
             return "never"
 
         from app.reliability.timeout_controller import TimeoutError as TOError
+
         with pytest.raises(TOError):
             await tc.execute(slow)
 
@@ -222,6 +235,7 @@ class TestTimeoutController:
 
 
 # ── Failure Tracker Tests ────────────────────────────────────────
+
 
 class TestFailureTracker:
     """Tests for the FailureTracker sliding window."""
@@ -264,6 +278,7 @@ class TestFailureTracker:
 
 # ── Integration: Composed Reliability Chain ──────────────────────
 
+
 class TestReliabilityChain:
     """Tests combining CircuitBreaker + RetryPolicy + Timeout."""
 
@@ -272,9 +287,7 @@ class TestReliabilityChain:
         """Full chain: timeout → retry → circuit_breaker succeeds."""
         tracker = FailureTracker("chain_test")
         cb = CircuitBreaker("chain_cb", failure_threshold=5, tracker=tracker)
-        retry = RetryPolicy(
-            "chain_retry", max_retries=2, base_delay=0.01, tracker=tracker
-        )
+        retry = RetryPolicy("chain_retry", max_retries=2, base_delay=0.01, tracker=tracker)
         timeout = TimeoutController("chain_timeout", timeout_seconds=1.0)
 
         async def real_call():

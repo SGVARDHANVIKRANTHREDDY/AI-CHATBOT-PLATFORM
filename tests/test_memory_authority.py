@@ -9,19 +9,15 @@ Covers:
     • Confidence-based tiebreaking
     • End-to-end controller reconciliation
 """
+
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from app.memory.authority import (
-    KG_CONFIDENCE_THRESHOLD,
     MemoryAuthorityResolver,
-    MemoryConflict,
     MemoryFact,
     MemorySource,
     extract_facts_from_conversation,
@@ -30,11 +26,10 @@ from app.memory.authority import (
 )
 from app.memory.memory_controller import (
     UnifiedMemoryController,
-    UnifiedMemorySnapshot,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def resolver():
@@ -43,10 +38,11 @@ def resolver():
 
 @pytest.fixture
 def now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ── Fact extraction tests ─────────────────────────────────────────
+
 
 class TestExtractFacts:
     def test_extract_from_conversation_simple(self):
@@ -98,6 +94,7 @@ class TestExtractFacts:
 
 # ── Authority hierarchy tests ─────────────────────────────────────
 
+
 class TestAuthorityHierarchy:
     def test_conversation_overrides_vector(self, resolver, now):
         """Conversation memory is the highest authority."""
@@ -131,6 +128,7 @@ class TestAuthorityHierarchy:
 
 # ── KG confidence threshold tests ────────────────────────────────
 
+
 class TestKGConfidenceGating:
     def test_kg_below_threshold_excluded(self, resolver, now):
         """KG facts with confidence < 0.8 are dropped entirely."""
@@ -159,6 +157,7 @@ class TestKGConfidenceGating:
 
 
 # ── Conflict detection tests ─────────────────────────────────────
+
 
 class TestConflictDetection:
     def test_detects_value_disagreement(self, resolver, now):
@@ -207,11 +206,12 @@ class TestConflictDetection:
 
 # ── Timestamp tiebreaking tests ──────────────────────────────────
 
+
 class TestTimestampResolution:
     def test_latest_timestamp_wins_same_source(self, resolver):
         """Within the same authority tier, latest timestamp wins."""
-        old = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        new = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        old = datetime(2025, 1, 1, tzinfo=UTC)
+        new = datetime(2025, 6, 1, tzinfo=UTC)
         facts = [
             MemoryFact("language", "Python", MemorySource.CONVERSATION, old, 1.0),
             MemoryFact("language", "Rust", MemorySource.CONVERSATION, new, 1.0),
@@ -220,8 +220,8 @@ class TestTimestampResolution:
         assert resolved["language"].value == "Rust"
 
     def test_latest_wins_vector_tier(self, resolver):
-        old = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        new = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        old = datetime(2025, 1, 1, tzinfo=UTC)
+        new = datetime(2025, 6, 1, tzinfo=UTC)
         facts = [
             MemoryFact("framework", "Django", MemorySource.VECTOR, old, 0.7),
             MemoryFact("framework", "FastAPI", MemorySource.VECTOR, new, 0.7),
@@ -230,8 +230,8 @@ class TestTimestampResolution:
         assert resolved["framework"].value == "FastAPI"
 
     def test_conflict_reports_timestamp_reason(self, resolver):
-        old = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        new = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        old = datetime(2025, 1, 1, tzinfo=UTC)
+        new = datetime(2025, 6, 1, tzinfo=UTC)
         facts = [
             MemoryFact("language", "Python", MemorySource.CONVERSATION, old, 1.0),
             MemoryFact("language", "Rust", MemorySource.CONVERSATION, new, 1.0),
@@ -242,6 +242,7 @@ class TestTimestampResolution:
 
 
 # ── Confidence tiebreaking tests ─────────────────────────────────
+
 
 class TestConfidenceResolution:
     def test_higher_confidence_wins_same_time_same_source(self, resolver, now):
@@ -263,6 +264,7 @@ class TestConfidenceResolution:
 
 
 # ── Reconcile (combined) tests ────────────────────────────────────
+
 
 class TestReconcile:
     def test_reconcile_returns_both(self, resolver, now):
@@ -287,9 +289,9 @@ class TestReconcile:
 
     def test_reconcile_complex_scenario(self, resolver):
         """Real-world scenario: user changed language preference."""
-        t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        t2 = datetime(2025, 3, 1, tzinfo=timezone.utc)
-        t3 = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        t1 = datetime(2025, 1, 1, tzinfo=UTC)
+        t2 = datetime(2025, 3, 1, tzinfo=UTC)
+        t3 = datetime(2025, 6, 1, tzinfo=UTC)
 
         facts = [
             # Old vector memory says Python
@@ -307,31 +309,34 @@ class TestReconcile:
 
 # ── UnifiedMemoryController integration tests ────────────────────
 
+
 class TestUnifiedMemoryControllerReconciliation:
     @pytest.fixture
     def mock_memory_service(self):
         svc = MagicMock()
-        svc.get_messages = AsyncMock(return_value=[
-            {"role": "user", "content": "my language is Python"},
-            {"role": "assistant", "content": "Noted!"},
-            {"role": "user", "content": "my editor is VSCode"},
-        ])
+        svc.get_messages = AsyncMock(
+            return_value=[
+                {"role": "user", "content": "my language is Python"},
+                {"role": "assistant", "content": "Noted!"},
+                {"role": "user", "content": "my editor is VSCode"},
+            ]
+        )
         svc.add_message = AsyncMock()
         return svc
 
     @pytest.fixture
     def mock_retriever(self):
         retriever = MagicMock()
-        retriever.retrieve_context = AsyncMock(
-            return_value="my language is Java\nsome other text"
-        )
+        retriever.retrieve_context = AsyncMock(return_value="my language is Java\nsome other text")
         retriever.store_turn = AsyncMock()
 
         kg = MagicMock()
         kg.entities = {"python", "java"}
-        kg.query = MagicMock(return_value=[
-            {"subject": "user", "relation": "prefers_language", "object": "Go", "trust_score": 0.9},
-        ])
+        kg.query = MagicMock(
+            return_value=[
+                {"subject": "user", "relation": "prefers_language", "object": "Go", "trust_score": 0.9},
+            ]
+        )
         retriever.kg = kg
         return retriever
 
@@ -344,24 +349,20 @@ class TestUnifiedMemoryControllerReconciliation:
 
     @pytest.mark.asyncio
     async def test_controller_detects_conflicts(self, controller):
-        snapshot = await controller.get_unified_context(
-            "what python language", "sess-1"
-        )
+        snapshot = await controller.get_unified_context("what python language", "sess-1")
         # The snapshot should have resolved_facts populated
         assert isinstance(snapshot.resolved_facts, dict)
         assert isinstance(snapshot.conflicts, list)
 
     @pytest.mark.asyncio
-    async def test_controller_conversation_overrides_vector(
-        self, mock_memory_service, mock_retriever
-    ):
+    async def test_controller_conversation_overrides_vector(self, mock_memory_service, mock_retriever):
         """Conversation says Python, vector says Java → Python wins."""
-        mock_memory_service.get_messages = AsyncMock(return_value=[
-            {"role": "user", "content": "my language is Python"},
-        ])
-        mock_retriever.retrieve_context = AsyncMock(
-            return_value="my language is Java"
+        mock_memory_service.get_messages = AsyncMock(
+            return_value=[
+                {"role": "user", "content": "my language is Python"},
+            ]
         )
+        mock_retriever.retrieve_context = AsyncMock(return_value="my language is Java")
         mock_retriever.kg.entities = set()
         mock_retriever.kg.query = MagicMock(return_value=[])
 
@@ -376,17 +377,16 @@ class TestUnifiedMemoryControllerReconciliation:
             assert snapshot.resolved_facts["language"].source == MemorySource.CONVERSATION
 
     @pytest.mark.asyncio
-    async def test_controller_kg_confidence_gating(
-        self, mock_memory_service, mock_retriever
-    ):
+    async def test_controller_kg_confidence_gating(self, mock_memory_service, mock_retriever):
         """KG fact with low confidence should be excluded from resolved facts."""
         mock_memory_service.get_messages = AsyncMock(return_value=[])
         mock_retriever.retrieve_context = AsyncMock(return_value="")
         mock_retriever.kg.entities = {"user"}
-        mock_retriever.kg.query = MagicMock(return_value=[
-            {"subject": "user", "relation": "prefers_language", "object": "Perl",
-             "trust_score": 0.3},
-        ])
+        mock_retriever.kg.query = MagicMock(
+            return_value=[
+                {"subject": "user", "relation": "prefers_language", "object": "Perl", "trust_score": 0.3},
+            ]
+        )
 
         ctrl = UnifiedMemoryController(
             memory_service_factory=lambda sid: mock_memory_service,
@@ -400,21 +400,17 @@ class TestUnifiedMemoryControllerReconciliation:
                 assert fact.source != MemorySource.KNOWLEDGE_GRAPH or fact.confidence >= 0.8
 
     @pytest.mark.asyncio
-    async def test_controller_merged_context_includes_resolved(
-        self, controller
-    ):
-        snapshot = await controller.get_unified_context(
-            "what python language", "sess-2"
-        )
+    async def test_controller_merged_context_includes_resolved(self, controller):
+        snapshot = await controller.get_unified_context("what python language", "sess-2")
         assert "CONVERSATION HISTORY" in snapshot.merged_context
 
     @pytest.mark.asyncio
-    async def test_controller_store_interaction_unchanged(
-        self, controller, mock_memory_service, mock_retriever
-    ):
+    async def test_controller_store_interaction_unchanged(self, controller, mock_memory_service, mock_retriever):
         """store_interaction still writes to all three layers."""
         await controller.store_interaction(
-            "s1", "hello", "hi there",
+            "s1",
+            "hello",
+            "hi there",
             kg_data={"entities": ["user"], "relationships": []},
         )
         mock_memory_service.add_message.assert_called()
@@ -422,6 +418,7 @@ class TestUnifiedMemoryControllerReconciliation:
 
 
 # ── Edge case tests ───────────────────────────────────────────────
+
 
 class TestEdgeCases:
     def test_empty_facts_no_crash(self, resolver):

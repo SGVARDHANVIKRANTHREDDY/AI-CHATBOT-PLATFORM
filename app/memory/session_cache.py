@@ -1,25 +1,28 @@
 from __future__ import annotations
+
 import json
-from typing import Any, Dict, List, Optional
+
 import redis.asyncio as redis
+
 from app.config.settings import settings
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
+
 class SessionCache:
     """Redis-based short-term session cache for low-latency retrieval."""
-    
+
     def __init__(self, url: str = settings.REDIS_URL):
         self._url = url
-        self._client: Optional[redis.Redis] = None
+        self._client: redis.Redis | None = None
 
     async def _get_client(self) -> redis.Redis:
         if self._client is None:
             self._client = redis.from_url(self._url, decode_responses=True)
         return self._client
 
-    async def get_messages(self, session_id: str, limit: int = 10) -> List[Dict[str, str]]:
+    async def get_messages(self, session_id: str, limit: int = 10) -> list[dict[str, str]]:
         try:
             client = await self._get_client()
             key = f"chat:session:{session_id}"

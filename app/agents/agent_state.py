@@ -1,19 +1,23 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+
 from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
 
 class AgentState(BaseModel):
     """
     Maintains the state of a multi-agent execution session.
     Tracks task progress, results, and reasoning history.
     """
+
     session_id: str
-    task_graph: Dict[str, Any] = Field(default_factory=dict)
-    completed_steps: List[str] = Field(default_factory=list)
-    intermediate_results: Dict[str, Any] = Field(default_factory=dict)
-    tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
-    reasoning_trace: List[str] = Field(default_factory=list)
+    task_graph: dict[str, Any] = Field(default_factory=dict)
+    completed_steps: list[str] = Field(default_factory=list)
+    intermediate_results: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    reasoning_trace: list[str] = Field(default_factory=list)
     start_time: datetime = Field(default_factory=datetime.now)
     max_steps: int = 8
     current_step_count: int = 0
@@ -36,10 +40,7 @@ class AgentState(BaseModel):
         2. current_step_count >= max_steps
         3. tool_call_count >= max_tool_calls
         """
-        return (
-            self.current_step_count >= self.max_steps or 
-            self.tool_call_count >= self.max_tool_calls
-        )
+        return self.current_step_count >= self.max_steps or self.tool_call_count >= self.max_tool_calls
 
     def add_trace(self, message: str):
         self.reasoning_trace.append(f"[{datetime.now().isoformat()}] {message}")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -21,10 +20,7 @@ def _is_excluded_dir(path: Path, rules: Rules) -> bool:
 
 def _is_excluded_file(path: Path, rules: Rules) -> bool:
     rel = path.relative_to(rules.root).as_posix()
-    for pat in rules.exclude_file_globs:
-        if Path(rel).match(pat):
-            return True
-    return False
+    return any(Path(rel).match(pat) for pat in rules.exclude_file_globs)
 
 
 def _collect_files(rules: Rules) -> list[Path]:

@@ -2,20 +2,13 @@
 Tests for production API protection: token-bucket rate limiting, JWT auth,
 request size limits, timeout protection, and abuse detection.
 """
+
 from __future__ import annotations
 
 import asyncio
-import time
-from datetime import datetime, timezone, timedelta
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from starlette.responses import JSONResponse
-from starlette.testclient import TestClient as StarletteTestClient
-
 from app.api.middleware.jwt_auth import (
     JWTAuthMiddleware,
     create_jwt,
@@ -30,10 +23,10 @@ from app.api.middleware.request_protection import (
 from app.api.middleware.token_bucket import (
     AGENT_BUCKET,
     GENERAL_BUCKET,
-    BucketConfig,
     TokenBucketRateLimiter,
 )
-
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
 
 # ── JWT token tests ──────────────────────────────────────────────
 
@@ -67,18 +60,19 @@ class TestJWTTokens:
         token = create_jwt({"sub": "user-1"}, SECRET)
         parts = token.split(".")
         # Tamper with the payload
-        import base64, json
+        import base64
+        import json
+
         payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
         payload["sub"] = "admin"
-        parts[1] = base64.urlsafe_b64encode(
-            json.dumps(payload, separators=(",", ":")).encode()
-        ).rstrip(b"=").decode()
+        parts[1] = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).rstrip(b"=").decode()
         tampered = ".".join(parts)
         with pytest.raises(ValueError, match="Invalid JWT signature"):
             decode_jwt(tampered, SECRET)
 
 
 # ── JWT middleware tests ─────────────────────────────────────────
+
 
 class TestJWTAuthMiddleware:
     @pytest.fixture
@@ -140,6 +134,7 @@ class TestJWTAuthMiddleware:
 
 # ── Request size limit tests ─────────────────────────────────────
 
+
 class TestRequestSizeLimit:
     @pytest.fixture
     def app_with_size_limit(self):
@@ -169,6 +164,7 @@ class TestRequestSizeLimit:
 
 
 # ── Timeout protection tests ─────────────────────────────────────
+
 
 class TestTimeoutProtection:
     @pytest.fixture
@@ -200,6 +196,7 @@ class TestTimeoutProtection:
 
 
 # ── Token bucket rate limiter tests ──────────────────────────────
+
 
 class TestTokenBucketRateLimiter:
     def _make_request(self, ip: str = "1.2.3.4") -> Request:
@@ -254,6 +251,7 @@ class TestTokenBucketRateLimiter:
 
 # ── Abuse detection tests ────────────────────────────────────────
 
+
 class TestAbuseDetection:
     @pytest.fixture(autouse=True)
     def clear_tracker(self):
@@ -283,7 +281,7 @@ class TestAbuseDetection:
 
     def test_missing_user_agent_logged(self, app_with_abuse):
         client = TestClient(app_with_abuse)
-        with patch("app.api.middleware.request_protection._LOG") as mock_log:
+        with patch("app.api.middleware.request_protection._LOG"):
             # TestClient always sends testclient user-agent, so
             # we override by setting an empty one explicitly
             resp = client.get("/ping", headers={"user-agent": ""})
@@ -301,12 +299,14 @@ class TestAbuseDetection:
 
 # ── Integration: full middleware stack ────────────────────────────
 
+
 class TestFullMiddlewareStack:
     """Test the app from main.py with all middleware wired."""
 
     @pytest.fixture
     def client(self):
         from app.api.main import app
+
         return TestClient(app, raise_server_exceptions=False)
 
     def test_healthz_no_auth(self, client):

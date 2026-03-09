@@ -1,22 +1,26 @@
 from __future__ import annotations
+
 import time
-from typing import AsyncIterator, Optional
+from collections.abc import AsyncIterator
+
 from huggingface_hub import AsyncInferenceClient
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from app.llm.base import LLMProvider
-from app.shared.utils import get_logger, emit_observability_event
-from app.shared.tracing import traced
-from app.shared.monitoring import LLM_TOKEN_USAGE, LLM_CALL_DURATION
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
 from app.config.settings import settings
+from app.llm.base import LLMProvider
+from app.shared.monitoring import LLM_CALL_DURATION, LLM_TOKEN_USAGE
+from app.shared.tracing import traced
+from app.shared.utils import emit_observability_event, get_logger
 
 _LOG = get_logger(__name__)
 
+
 class HuggingFaceProvider(LLMProvider):
     def __init__(
-        self, 
-        model_id: str = settings.HF_MODEL, 
-        token: Optional[str] = settings.HF_TOKEN,
-        api_url: Optional[str] = settings.HF_API_URL
+        self,
+        model_id: str = settings.HF_MODEL,
+        token: str | None = settings.HF_TOKEN,
+        api_url: str | None = settings.HF_API_URL,
     ):
         self.model_id = model_id
         if api_url:
@@ -28,15 +32,18 @@ class HuggingFaceProvider(LLMProvider):
         stop=stop_after_attempt(settings.LLM_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
-        reraise=True
+        reraise=True,
     )
     @traced("llm.ask")
-    async def ask(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
+    async def ask(self, prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
         model_to_use = model or self.model_id
         t0 = time.perf_counter()
         emit_observability_event(
-            _LOG, event="llm.call.start", category="llm",
-            model=model_to_use, provider="huggingface",
+            _LOG,
+            event="llm.call.start",
+            category="llm",
+            model=model_to_use,
+            provider="huggingface",
             prompt_length=len(prompt),
         )
         try:
@@ -44,11 +51,11 @@ class HuggingFaceProvider(LLMProvider):
                 model=model_to_use,
                 messages=[
                     {"role": "system", "content": system_prompt or "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=settings.HF_MAX_TOKENS,
                 temperature=settings.HF_TEMPERATURE,
-                stream=False
+                stream=False,
             )
             elapsed = time.perf_counter() - t0
             LLM_CALL_DURATION.labels(model=model_to_use, provider="huggingface").observe(elapsed)
@@ -61,22 +68,32 @@ class HuggingFaceProvider(LLMProvider):
                 LLM_TOKEN_USAGE.labels(model=model_to_use, type="prompt").inc(prompt_tokens)
                 LLM_TOKEN_USAGE.labels(model=model_to_use, type="completion").inc(completion_tokens)
             emit_observability_event(
-                _LOG, event="llm.call.complete", category="llm",
-                duration_ms=elapsed * 1000, model=model_to_use,
-                provider="huggingface", response_length=len(content),
+                _LOG,
+                event="llm.call.complete",
+                category="llm",
+                duration_ms=elapsed * 1000,
+                model=model_to_use,
+                provider="huggingface",
+                response_length=len(content),
             )
             return content
         except Exception as e:
             elapsed = time.perf_counter() - t0
             emit_observability_event(
-                _LOG, event="llm.call.error", category="llm",
-                duration_ms=elapsed * 1000, model=model_to_use,
-                provider="huggingface", error=str(e),
+                _LOG,
+                event="llm.call.error",
+                category="llm",
+                duration_ms=elapsed * 1000,
+                model=model_to_use,
+                provider="huggingface",
+                error=str(e),
             )
             _LOG.error(f"HuggingFace request failed: {e}")
             raise
 
-    async def ask_stream(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> AsyncIterator[str]:
+    async def ask_stream(
+        self, prompt: str, system_prompt: str | None = None, model: str | None = None
+    ) -> AsyncIterator[str]:
         model_to_use = model or self.model_id
         _LOG.info(f"Asynchronous streaming from HF API: {model_to_use}")
         try:
@@ -84,11 +101,11 @@ class HuggingFaceProvider(LLMProvider):
                 model=model_to_use,
                 messages=[
                     {"role": "system", "content": system_prompt or "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=settings.HF_MAX_TOKENS,
                 temperature=settings.HF_TEMPERATURE,
-                stream=True
+                stream=True,
             )
             async for chunk in stream:
                 content = chunk.choices[0].delta.content

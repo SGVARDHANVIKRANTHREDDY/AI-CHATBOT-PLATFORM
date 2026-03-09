@@ -8,20 +8,18 @@ Verifies that the PluginRunner properly:
     • Strips environment variables from the child process.
     • Returns structured errors for all failure modes.
 """
+
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 import sys
-import textwrap
 import tempfile
+import textwrap
 import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from app.plugins.registry import PluginRunner, PluginRunResult
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -56,6 +54,7 @@ def _write_plugin(name: str, source: str) -> str:
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def runner():
     """PluginRunner configured with a short timeout for tests."""
@@ -78,10 +77,13 @@ def fast_runner():
 
 # ── Test: Timeout enforcement ────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_plugin_timeout_kills_subprocess(fast_runner):
     """A plugin that sleeps longer than the timeout must be killed."""
-    mod = _write_plugin("slow_plugin", """
+    mod = _write_plugin(
+        "slow_plugin",
+        """
         import time
         def slow_func(**kwargs):
             time.sleep(60)
@@ -89,7 +91,8 @@ async def test_plugin_timeout_kills_subprocess(fast_runner):
 
         def register_tools():
             return {"slow_func": slow_func}
-    """)
+    """,
+    )
 
     result = await fast_runner.run_plugin(mod, "slow_func")
 
@@ -100,17 +103,21 @@ async def test_plugin_timeout_kills_subprocess(fast_runner):
 
 # ── Test: Infinite loop ──────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_plugin_infinite_loop_killed(fast_runner):
     """A plugin stuck in an infinite loop must be killed by timeout."""
-    mod = _write_plugin("loop_plugin", """
+    mod = _write_plugin(
+        "loop_plugin",
+        """
         def infinite(**kwargs):
             while True:
                 pass
 
         def register_tools():
             return {"infinite": infinite}
-    """)
+    """,
+    )
 
     result = await fast_runner.run_plugin(mod, "infinite")
 
@@ -120,6 +127,7 @@ async def test_plugin_infinite_loop_killed(fast_runner):
 
 
 # ── Test: Filesystem access blocked ──────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_plugin_filesystem_access_fails(runner):
@@ -133,7 +141,9 @@ async def test_plugin_filesystem_access_fails(runner):
     """
     # Write a plugin that tries to create a file in a temp directory
     target = os.path.join(tempfile.gettempdir(), f"plugin_test_{uuid.uuid4().hex}.txt")
-    mod = _write_plugin("fs_plugin", f"""
+    mod = _write_plugin(
+        "fs_plugin",
+        f"""
         def write_file(**kwargs):
             # Attempt to write to the filesystem
             with open(r"{target}", "w") as f:
@@ -142,7 +152,8 @@ async def test_plugin_filesystem_access_fails(runner):
 
         def register_tools():
             return {{"write_file": write_file}}
-    """)
+    """,
+    )
 
     result = await runner.run_plugin(mod, "write_file")
 
@@ -157,10 +168,13 @@ async def test_plugin_filesystem_access_fails(runner):
 
 # ── Test: Environment variables stripped ─────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_plugin_cannot_read_app_env_vars(runner):
     """Plugins must not see application environment variables."""
-    mod = _write_plugin("env_plugin", """
+    mod = _write_plugin(
+        "env_plugin",
+        """
         import os
         def read_env(**kwargs):
             secret = os.environ.get("DATABASE_URL", "NOT_FOUND")
@@ -169,7 +183,8 @@ async def test_plugin_cannot_read_app_env_vars(runner):
 
         def register_tools():
             return {"read_env": read_env}
-    """)
+    """,
+    )
 
     # Set a fake secret in the parent process
     with patch.dict(os.environ, {"DATABASE_URL": "postgres://secret", "OPENAI_API_KEY": "sk-secret"}):
@@ -183,17 +198,21 @@ async def test_plugin_cannot_read_app_env_vars(runner):
 
 # ── Test: Normal plugin execution works ──────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_plugin_normal_execution(runner):
     """A well-behaved plugin returns its result correctly."""
-    mod = _write_plugin("good_plugin", """
+    mod = _write_plugin(
+        "good_plugin",
+        """
         def greet(**kwargs):
             name = kwargs.get("name", "World")
             return f"Hello, {name}!"
 
         def register_tools():
             return {"greet": greet}
-    """)
+    """,
+    )
 
     result = await runner.run_plugin(mod, "greet", {"name": "Alice"})
 
@@ -204,16 +223,20 @@ async def test_plugin_normal_execution(runner):
 
 # ── Test: Plugin exception is captured ───────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_plugin_exception_captured(runner):
     """Exceptions in the plugin must be captured, not crash the parent."""
-    mod = _write_plugin("crash_plugin", """
+    mod = _write_plugin(
+        "crash_plugin",
+        """
         def crash(**kwargs):
             raise ValueError("intentional plugin error")
 
         def register_tools():
             return {"crash": crash}
-    """)
+    """,
+    )
 
     result = await runner.run_plugin(mod, "crash")
 
@@ -224,16 +247,20 @@ async def test_plugin_exception_captured(runner):
 
 # ── Test: Subprocess returns structured PluginRunResult ──────────
 
+
 @pytest.mark.asyncio
 async def test_result_structure(runner):
     """Every invocation returns a well-formed PluginRunResult."""
-    mod = _write_plugin("struct_plugin", """
+    mod = _write_plugin(
+        "struct_plugin",
+        """
         def noop(**kwargs):
             return 42
 
         def register_tools():
             return {"noop": noop}
-    """)
+    """,
+    )
 
     result = await runner.run_plugin(mod, "noop")
 

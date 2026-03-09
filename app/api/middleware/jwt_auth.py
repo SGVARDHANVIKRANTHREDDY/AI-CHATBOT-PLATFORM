@@ -12,12 +12,16 @@ Configuration (via env / settings):
 
 Public paths (health, metrics, docs) are excluded automatically.
 """
+
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
+import json
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Optional, Set
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -30,7 +34,7 @@ from app.shared.utils import get_logger
 _LOG = get_logger(__name__)
 
 # Paths that never require a JWT
-_PUBLIC_PATHS: Set[str] = {
+_PUBLIC_PATHS: set[str] = {
     "/",
     "/healthz",
     "/metrics",
@@ -46,10 +50,6 @@ def _is_public(path: str) -> bool:
 
 # ── Minimal JWT helpers (HS256, no heavy dependency) ──────────────
 
-import base64
-import hashlib
-import json
-
 
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -63,14 +63,14 @@ def _b64url_decode(s: str) -> bytes:
 
 
 def create_jwt(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     secret: str,
     algorithm: str = "HS256",
     expiry_minutes: int = 60,
 ) -> str:
     """Create a signed JWT token."""
     header = {"alg": algorithm, "typ": "JWT"}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         **payload,
         "iat": int(now.timestamp()),
@@ -81,23 +81,19 @@ def create_jwt(
         _b64url_encode(json.dumps(payload, separators=(",", ":")).encode()),
     ]
     signing_input = f"{segments[0]}.{segments[1]}"
-    signature = hmac.new(
-        secret.encode(), signing_input.encode(), hashlib.sha256
-    ).digest()
+    signature = hmac.new(secret.encode(), signing_input.encode(), hashlib.sha256).digest()
     segments.append(_b64url_encode(signature))
     return ".".join(segments)
 
 
-def decode_jwt(token: str, secret: str) -> Dict[str, Any]:
+def decode_jwt(token: str, secret: str) -> dict[str, Any]:
     """Decode and verify a JWT token.  Raises ValueError on failure."""
     parts = token.split(".")
     if len(parts) != 3:
         raise ValueError("Malformed JWT: expected 3 segments")
 
     signing_input = f"{parts[0]}.{parts[1]}"
-    expected_sig = hmac.new(
-        secret.encode(), signing_input.encode(), hashlib.sha256
-    ).digest()
+    expected_sig = hmac.new(secret.encode(), signing_input.encode(), hashlib.sha256).digest()
     actual_sig = _b64url_decode(parts[2])
 
     if not hmac.compare_digest(expected_sig, actual_sig):
@@ -114,10 +110,11 @@ def decode_jwt(token: str, secret: str) -> Dict[str, Any]:
 
 # ── Middleware ─────────────────────────────────────────────────────
 
+
 class JWTAuthMiddleware(BaseHTTPMiddleware):
     """Validates Bearer tokens and populates ``request.state.user_id``."""
 
-    def __init__(self, app, secret_key: Optional[str] = None):
+    def __init__(self, app, secret_key: str | None = None):
         super().__init__(app)
         self._secret = secret_key or getattr(settings, "JWT_SECRET_KEY", "")
 

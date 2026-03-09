@@ -1,20 +1,24 @@
-from typing import Any, Dict, List, Optional, Literal
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 Confidence = Literal["high", "medium", "low"]
 
+
 class Citation(BaseModel):
     source: str
-    chunk_id: Optional[int] = None
-    score: Optional[float] = None
+    chunk_id: int | None = None
+    score: float | None = None
+
 
 class AnswerContract(BaseModel):
     answer: str
     confidence: Confidence
     used_rag: bool
-    rag_score: Optional[float] = None
+    rag_score: float | None = None
     used_web: bool
-    citations: List[Citation] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
+
 
 class ChatResponse(BaseModel):
     ok: bool = True

@@ -1,57 +1,59 @@
 from __future__ import annotations
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
-from app.config.settings import settings
-from app.shared.utils import get_logger, log_event
-from app.orchestrator.pipeline import ChatPipeline
-from app.security.refusal_guard import decide_refusal
+import time
+from collections.abc import AsyncIterator
+from typing import Any
 
-from app.security.prompt_guard import PromptGuard
-from app.cache.semantic_cache import SemanticCache
-from app.llm.model_router import ModelRouter
-from app.orchestrator.tool_runner import StreamingToolRunner
-from app.vector_memory.memory_retriever import MemoryRetriever
-from app.agents.planner_agent import PlannerAgent
 from app.agents.agent_router import AgentRouter
-from app.agents.research_agent import ResearchAgent
-from app.agents.reasoning_agent import ReasoningAgent
-from app.agents.coding_agent import CodingAgent
 from app.agents.agent_state import AgentState
+from app.agents.coding_agent import CodingAgent
 from app.agents.critic_agent import CriticAgent
-from app.knowledge_graph.entity_extractor import EntityExtractor
-from app.plugins.registry import PluginRegistry
-from app.evaluation.response_grader import ResponseGrader
+from app.agents.planner_agent import PlannerAgent
+from app.agents.reasoning_agent import ReasoningAgent
+from app.agents.research_agent import ResearchAgent
+from app.cache.semantic_cache import SemanticCache
+from app.config.settings import settings
 from app.evaluation.dataset_builder import DatasetBuilder
+from app.evaluation.response_grader import ResponseGrader
+from app.knowledge_graph.entity_extractor import EntityExtractor
+from app.llm.model_router import ModelRouter
+from app.memory.memory_controller import UnifiedMemoryController
+from app.orchestrator.pipeline import ChatPipeline
+from app.orchestrator.tool_runner import StreamingToolRunner
+from app.orchestrator.watchdog import (
+    AgentBudgetExceededError,
+    AgentExecutionContext,
+    AgentWatchdog,
+)
+from app.plugins.registry import PluginRegistry
 from app.prompts.evolution.manager import PromptEvolutionManager
 from app.reasoning_graph.engine import ReasoningGraphEngine
-from app.reasoning_graph.models import ReasoningGraph, ReasoningNode, NodeType, NodeStatus
-from app.tool_router.neural_router import NeuralToolRouter
+from app.reasoning_graph.models import NodeStatus
 
 # ── Reliability & Production Hardening ────────────────────────────
 from app.reliability.circuit_breaker import CircuitBreaker, CircuitOpenError
-from app.reliability.retry_policy import RetryPolicy
-from app.reliability.timeout_controller import TimeoutController
-from app.reliability.response_guard import ResponseValidator
 from app.reliability.load_guard import (
     AgentExecutionLimiter,
-    LoadGuardRejection,
+    LoadGuardRejectionError,
 )
-from app.orchestrator.watchdog import (
-    AgentWatchdog,
-    AgentExecutionContext,
-    AgentBudgetExceeded,
-)
-from app.memory.memory_controller import UnifiedMemoryController
-
+from app.reliability.response_guard import ResponseValidator
+from app.reliability.retry_policy import RetryPolicy
+from app.reliability.timeout_controller import TimeoutController
+from app.security.prompt_guard import PromptGuard
+from app.security.refusal_guard import decide_refusal
 from app.shared.monitoring import (
-    AI_AGENT_ITERATIONS, REASONING_GRAPH_NODES, REASONING_GRAPH_DEPTH,
-    HALLUCINATION_RATE, PROMPT_EVOLUTION_SCORE,
-    LLM_REQUEST_FAILURES, AGENT_CRASHES, RESPONSE_VALIDATION_ISSUES,
+    AGENT_CRASHES,
     AGENT_EXECUTION_TIME,
+    AI_AGENT_ITERATIONS,
+    HALLUCINATION_RATE,
+    LLM_REQUEST_FAILURES,
+    REASONING_GRAPH_DEPTH,
+    REASONING_GRAPH_NODES,
+    RESPONSE_VALIDATION_ISSUES,
 )
-from app.shared.tracing import start_span
-from app.shared.utils import get_logger, log_event, emit_observability_event
-import time
+from app.shared.utils import emit_observability_event, get_logger
+from app.tool_router.neural_router import NeuralToolRouter
+from app.vector_memory.memory_retriever import MemoryRetriever
 
 _LOG = get_logger(__name__)
 
@@ -72,12 +74,12 @@ class ChatOrchestrator:
         self.llm = llm_provider
         self.guard = PromptGuard()
         self.sem_cache = SemanticCache()
-        
+
         # Core Infrastructure
         self.router = ModelRouter()
         self.tool_runner = StreamingToolRunner()
         self.memory_retriever = MemoryRetriever()
-        
+
         # Frontier Layer: Prompt Evolution
         prompt_storage = settings.DATA_DIR / "prompts" / "evolution.json"
         self.prompt_manager = PromptEvolutionManager(str(prompt_storage), self.llm)
@@ -89,29 +91,27 @@ class ChatOrchestrator:
         self.planner = PlannerAgent(self.llm, self.prompt_manager)
         self.agent_router = AgentRouter()
         self.critic = CriticAgent(self.llm, self.prompt_manager)
-        
+
         # Knowledge & Plugins
         self.kg_extractor = EntityExtractor(self.llm)
         self.plugins = PluginRegistry()
         self.plugins.discover()
-        
+
         # Register Specialized Agents
         res_agent = ResearchAgent(self.llm, self.pipeline, self.tool_runner, self.prompt_manager)
         re_agent = ReasoningAgent(self.llm, self.prompt_manager)
         code_agent = CodingAgent(self.llm, self.tool_runner, self.prompt_manager)
-        
+
         self.agent_router.register_agent("research_agent", res_agent.execute)
         self.agent_router.register_agent("reasoning_agent", re_agent.execute)
         self.agent_router.register_agent("coding_agent", code_agent.execute)
-        
+
         # Register Plugin Tools into Tool Runner
         self.tool_runner.registry.update(self.plugins.get_tools())
 
         # Frontier Layer: Reasoning Graph Engine (needs agent_router)
-        self.graph_engine = ReasoningGraphEngine(
-            self.llm, self.tool_runner, self.memory_retriever, self.agent_router
-        )
-        
+        self.graph_engine = ReasoningGraphEngine(self.llm, self.tool_runner, self.memory_retriever, self.agent_router)
+
         # Evaluation
         self.grader = ResponseGrader(self.llm)
         self.dataset = DatasetBuilder()
@@ -134,9 +134,7 @@ class ChatOrchestrator:
         )
 
         # Timeout controller for LLM calls
-        self._llm_timeout = TimeoutController(
-            "llm_ask", timeout_seconds=_DEFAULT_LLM_TIMEOUT
-        )
+        self._llm_timeout = TimeoutController("llm_ask", timeout_seconds=_DEFAULT_LLM_TIMEOUT)
 
         # Response validator with known tool names
         known_tools = set(self.tool_runner.registry.keys())
@@ -146,9 +144,7 @@ class ChatOrchestrator:
         )
 
         # Agent execution limiter
-        self._agent_limiter = AgentExecutionLimiter(
-            max_agents=20, queue_timeout=15.0
-        )
+        self._agent_limiter = AgentExecutionLimiter(max_agents=20, queue_timeout=15.0)
 
         # Agent safety watchdog
         self._watchdog = AgentWatchdog(poll_interval=1.0)
@@ -161,17 +157,14 @@ class ChatOrchestrator:
 
     # ── Reliability-wrapped LLM call ──────────────────────────────
 
-    async def _safe_llm_ask(
-        self, prompt: str, system_prompt: str = "", model: Optional[str] = None
-    ) -> str:
+    async def _safe_llm_ask(self, prompt: str, system_prompt: str = "", model: str | None = None) -> str:
         """LLM call protected by timeout → retry → circuit breaker.
 
         Call chain: CircuitBreaker → RetryPolicy → TimeoutController → LLM
         """
+
         async def _timed_ask() -> str:
-            return await self._llm_timeout.execute(
-                self.llm.ask, prompt, system_prompt=system_prompt, model=model
-            )
+            return await self._llm_timeout.execute(self.llm.ask, prompt, system_prompt=system_prompt, model=model)
 
         async def _retried_ask() -> str:
             return await self._llm_retry.execute(_timed_ask)
@@ -179,29 +172,22 @@ class ChatOrchestrator:
         try:
             return await self._llm_circuit.call(_retried_ask)
         except CircuitOpenError:
-            LLM_REQUEST_FAILURES.labels(
-                provider="primary", error_type="circuit_open"
-            ).inc()
+            LLM_REQUEST_FAILURES.labels(provider="primary", error_type="circuit_open").inc()
             return "I'm temporarily unable to process this request. Please try again shortly."
         except Exception as exc:
-            LLM_REQUEST_FAILURES.labels(
-                provider="primary", error_type=type(exc).__name__
-            ).inc()
+            LLM_REQUEST_FAILURES.labels(provider="primary", error_type=type(exc).__name__).inc()
             raise
 
     async def _llm_fallback(self, *args: Any, **kwargs: Any) -> str:
         """Fallback when circuit is open — return a safe degraded response."""
         _LOG.warning("LLM circuit open — using fallback response")
-        return (
-            "I'm experiencing temporary difficulties connecting to my "
-            "language model. Please try again in a moment."
-        )
+        return "I'm experiencing temporary difficulties connecting to my language model. Please try again in a moment."
 
     # ── Agent loop ────────────────────────────────────────────────
 
     async def _execute_agent_loop(
         self, question: str, session_id: str
-    ) -> Tuple[str, Dict[str, Any], AgentState, List[Tuple[str, str]]]:
+    ) -> tuple[str, dict[str, Any], AgentState, list[tuple[str, str]]]:
         """Orchestrates the granular reasoning graph execution.
 
         Protected by AgentExecutionLimiter to bound concurrent agent loops
@@ -213,7 +199,7 @@ class ChatOrchestrator:
 
         async def _guarded_loop(
             ctx: AgentExecutionContext,
-        ) -> Tuple[str, Dict[str, Any], AgentState, List[Tuple[str, str]]]:
+        ) -> tuple[str, dict[str, Any], AgentState, list[tuple[str, str]]]:
             return await self._run_agent_graph(question, session_id, ctx)
 
         result, ctx = await self._watchdog.guarded_execute(
@@ -237,9 +223,10 @@ class ChatOrchestrator:
             f"(iters={ctx.iteration_count}, tools={ctx.tool_call_count}, "
             f"elapsed={ctx.elapsed_seconds:.1f}s)"
         )
-        partial_text = "\n".join(
-            str(r.get("result", "")) for r in ctx.partial_results
-        ) or "I was unable to complete the full analysis within the time budget."
+        partial_text = (
+            "\n".join(str(r.get("result", "")) for r in ctx.partial_results)
+            or "I was unable to complete the full analysis within the time budget."
+        )
 
         return partial_text, {}, state, []
 
@@ -248,7 +235,7 @@ class ChatOrchestrator:
         question: str,
         session_id: str,
         ctx: AgentExecutionContext,
-    ) -> Tuple[str, Dict[str, Any], AgentState, List[Tuple[str, str]]]:
+    ) -> tuple[str, dict[str, Any], AgentState, list[tuple[str, str]]]:
         """Inner agent loop — runs under watchdog protection."""
         _LOG.info("[%s] Starting reasoning graph for: %s", ctx.execution_id, question)
         agent_t0 = time.perf_counter()
@@ -264,15 +251,18 @@ class ChatOrchestrator:
         used_versions = [("planner_agent", planner_version)]
 
         emit_observability_event(
-            _LOG, event="prompt.version", category="prompt",
-            prompt_key="planner_agent", version=planner_version,
+            _LOG,
+            event="prompt.version",
+            category="prompt",
+            prompt_key="planner_agent",
+            version=planner_version,
         )
 
         # 2. Execution (Graph-based) — pass context for per-node budget checks
         try:
             graph_versions = await self.graph_engine.execute(graph, state, ctx)
             used_versions.extend(graph_versions)
-        except AgentBudgetExceeded:
+        except AgentBudgetExceededError:
             _LOG.warning("[%s] budget exceeded during graph execution", ctx.execution_id)
             state.add_trace(f"Budget exceeded: {ctx.termination_reason.value}")
         except Exception as exc:
@@ -287,16 +277,14 @@ class ChatOrchestrator:
         AI_AGENT_ITERATIONS.observe(len(state.completed_steps))
 
         # 3. Aggregation
-        results_summary = "\n".join([
-            f"{n.id} ({n.type}): {n.result}"
-            for n in graph.nodes.values()
-            if n.status == NodeStatus.COMPLETED
-        ])
+        results_summary = "\n".join(
+            [f"{n.id} ({n.type}): {n.result}" for n in graph.nodes.values() if n.status == NodeStatus.COMPLETED]
+        )
         final_aggregation_prompt = (
             f"Based on the following execution results, provide a comprehensive "
             f"final answer to: '{question}'\n\nResults:\n{results_summary}"
         )
-        
+
         # Use reliability-wrapped LLM call for synthesis
         version_id = "static"
         if self.prompt_manager:
@@ -308,24 +296,22 @@ class ChatOrchestrator:
                 )
                 template, version_id = self.prompt_manager.get_prompt_with_id("synthesizer")
             used_versions.append(("synthesizer", version_id))
-            final_answer = await self._safe_llm_ask(
-                final_aggregation_prompt, system_prompt=template
-            )
+            final_answer = await self._safe_llm_ask(final_aggregation_prompt, system_prompt=template)
         else:
             final_answer = await self._safe_llm_ask(
                 final_aggregation_prompt,
                 system_prompt="You are a professional synthesizer.",
             )
-        
+
         # 4. Self-Correction (Critic)
         evaluation, critic_version = await self.critic.evaluate(final_answer, state)
         used_versions.append(("critic_agent", critic_version))
-        
+
         if evaluation.get("needs_revision") and evaluation.get("corrected_response"):
             _LOG.info("Critic requested revision. Using corrected response.")
             final_answer = evaluation["corrected_response"]
             state.add_trace("Response corrected by CriticAgent.")
-        
+
         # ── Telemetry: Hallucination tracking ──
         if evaluation.get("hallucinations_detected"):
             HALLUCINATION_RATE.labels(severity="high").inc()
@@ -335,11 +321,16 @@ class ChatOrchestrator:
         AGENT_EXECUTION_TIME.labels(agent_type="full_loop").observe(agent_elapsed)
         for p_key, v_id in used_versions:
             emit_observability_event(
-                _LOG, event="prompt.version", category="prompt",
-                prompt_key=p_key, version=v_id,
+                _LOG,
+                event="prompt.version",
+                category="prompt",
+                prompt_key=p_key,
+                version=v_id,
             )
         emit_observability_event(
-            _LOG, event="agent.loop.complete", category="agent",
+            _LOG,
+            event="agent.loop.complete",
+            category="agent",
             duration_ms=agent_elapsed * 1000,
             node_count=len(graph.nodes),
             steps_completed=len(state.completed_steps),
@@ -357,9 +348,9 @@ class ChatOrchestrator:
         use_rag: bool = True,
         use_web: bool = False,
         rag_top_k: int = 3,
-        system_prompt: Optional[str] = None,
-        stream: bool = False
-    ) -> Union[Dict[str, Any], AsyncIterator[str]]:
+        system_prompt: str | None = None,
+        stream: bool = False,
+    ) -> dict[str, Any] | AsyncIterator[str]:
         # 0. Prompt Security Check
         if self.guard.scan(question):
             return {
@@ -367,9 +358,9 @@ class ChatOrchestrator:
                 "confidence": "low",
                 "used_rag": False,
                 "used_web": False,
-                "citations": []
+                "citations": [],
             }
-        
+
         # 0b. Semantic Cache Check
         cached_response = await self.sem_cache.get(question)
         if cached_response:
@@ -379,13 +370,13 @@ class ChatOrchestrator:
                 "used_rag": False,
                 "used_web": False,
                 "citations": [],
-                "cached": True
+                "cached": True,
             }
 
         # 1. Intelligence & Context Gathering
         routing_info = await self.router.route(question)
         model = routing_info["selected_model"]
-        
+
         long_term_context = await self.memory_retriever.retrieve_context(question)
 
         final_prompt, sys_prompt, context_data = await self.pipeline.gather_context(
@@ -394,7 +385,7 @@ class ChatOrchestrator:
             use_web=use_web,
             rag_top_k=rag_top_k,
             system_prompt=system_prompt,
-            memory_vector_context=long_term_context
+            memory_vector_context=long_term_context,
         )
 
         # 2. Safety Refusal (Pre-LLM)
@@ -406,7 +397,7 @@ class ChatOrchestrator:
                 "used_rag": use_rag,
                 "rag_score": context_data.get("rag_score"),
                 "used_web": use_web,
-                "citations": context_data.get("rag_citations", [])
+                "citations": context_data.get("rag_citations", []),
             }
 
         # 3. Agentic Intelligence Execution
@@ -416,17 +407,13 @@ class ChatOrchestrator:
 
         # Non-streaming: Execute Full Agentic Brain (bounded by agent limiter)
         try:
-            raw_answer, critic_eval, agent_state, used_versions = (
-                await self._agent_limiter.execute(
-                    self._execute_agent_loop, question, session_id
-                )
+            raw_answer, critic_eval, agent_state, used_versions = await self._agent_limiter.execute(
+                self._execute_agent_loop, question, session_id
             )
-        except LoadGuardRejection:
+        except LoadGuardRejectionError:
             _LOG.warning("Agent limiter rejected — too many concurrent agents")
             # Fallback to direct LLM call without agentic loop
-            raw_answer = await self._safe_llm_ask(
-                final_prompt, system_prompt=sys_prompt, model=model
-            )
+            raw_answer = await self._safe_llm_ask(final_prompt, system_prompt=sys_prompt, model=model)
             critic_eval = {}
             agent_state = AgentState(session_id=session_id)
             used_versions = []
@@ -438,45 +425,32 @@ class ChatOrchestrator:
 
         # Emit validation metrics
         for issue in validation.issues:
-            RESPONSE_VALIDATION_ISSUES.labels(
-                category=issue.category, severity=issue.severity
-            ).inc()
+            RESPONSE_VALIDATION_ISSUES.labels(category=issue.category, severity=issue.severity).inc()
 
         if not validation.is_valid:
-            _LOG.warning(
-                "Response validation failed — %d issues", len(validation.issues)
-            )
+            _LOG.warning("Response validation failed — %d issues", len(validation.issues))
 
         # 5. Post-Process: Knowledge Graph & Evaluation
-        kg_data = await self.kg_extractor.extract(
-            f"User: {question}\nAssistant: {raw_answer}"
-        )
+        kg_data = await self.kg_extractor.extract(f"User: {question}\nAssistant: {raw_answer}")
         self.memory_retriever.kg.add_data(kg_data["entities"], kg_data["relationships"])
-        
+
         overall_grade = await self.grader.grade(question, raw_answer)
         score = overall_grade.get("score", 0.0)
-        
+
         # Record Feedback for Self-Evolving Prompts
         for p_key, v_id in used_versions:
             await self.prompt_manager.record_feedback(p_key, v_id, score)
 
         # Log to evaluation dataset
-        self.dataset.log_interaction(
-            question, 
-            raw_answer, 
-            overall_grade, 
-            plan=agent_state.task_graph
-        )
+        self.dataset.log_interaction(question, raw_answer, overall_grade, plan=agent_state.task_graph)
 
         # 6. Memory Persistence (via unified controller)
-        await self._memory_controller.store_interaction(
-            session_id, question, raw_answer, kg_data=kg_data
-        )
+        await self._memory_controller.store_interaction(session_id, question, raw_answer, kg_data=kg_data)
 
         if self.pipeline.memory_service:
             self.pipeline.memory_service.add_message("user", question)
             self.pipeline.memory_service.add_message("assistant", raw_answer)
-        
+
         # Populate Semantic Cache
         await self.sem_cache.set(question, raw_answer)
 

@@ -16,11 +16,11 @@ Identity resolution order:
     2. API key               (``X-API-Key`` header)
     3. Client IP             (fallback)
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 import redis.asyncio as redis
 from fastapi import HTTPException, Request
@@ -32,8 +32,7 @@ from app.shared.utils import get_logger
 _LOG = get_logger(__name__)
 
 # Lua script: atomic refill-and-consume in one round trip
-_TOKEN_BUCKET_LUA = """
-local key       = KEYS[1]
+_TOKEN_BUCKET_LUA = """local key       = KEYS[1]
 local capacity  = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])   -- tokens per second
 local now       = tonumber(ARGV[3])
@@ -70,6 +69,7 @@ return 1
 @dataclass(frozen=True)
 class BucketConfig:
     """Defines a token-bucket rate limit tier."""
+
     capacity: int
     refill_per_second: float
     ttl: int = 120  # Redis key expiry
@@ -96,8 +96,8 @@ class TokenBucketRateLimiter:
         self._url = redis_url
         self.general = general
         self.agent = agent
-        self._client: Optional[redis.Redis] = None
-        self._script_sha: Optional[str] = None
+        self._client: redis.Redis | None = None
+        self._script_sha: str | None = None
 
     async def _get_client(self) -> redis.Redis:
         if self._client is None:
@@ -161,8 +161,7 @@ class TokenBucketRateLimiter:
                 )
                 raise HTTPException(
                     status_code=HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Rate limit exceeded ({bucket_name}: "
-                           f"{bucket.capacity}/min). Retry later.",
+                    detail=f"Rate limit exceeded ({bucket_name}: {bucket.capacity}/min). Retry later.",
                     headers={"Retry-After": "60"},
                 )
 

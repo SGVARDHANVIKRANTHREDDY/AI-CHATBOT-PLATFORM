@@ -13,26 +13,26 @@ Security invariants:
     • No pickle, no eval, no arbitrary deserialization.
     • The child MUST respond within the timeout or be killed.
 """
+
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ── Wire format helpers ───────────────────────────────────────────
+
 
 def write_message(stream, msg: dict) -> None:
     """Write a length-prefixed JSON message to *stream*."""
     payload = json.dumps(msg, default=str).encode("utf-8")
-    header = f"{len(payload)}\n".encode("utf-8")
+    header = f"{len(payload)}\n".encode()
     stream.write(header)
     stream.write(payload)
     stream.flush()
 
 
-def read_message(stream) -> Optional[dict]:
+def read_message(stream) -> dict | None:
     """Read a length-prefixed JSON message from *stream*.
 
     Returns None on EOF or malformed input.
@@ -54,20 +54,22 @@ def read_message(stream) -> Optional[dict]:
 
 # ── Request / Response data classes ───────────────────────────────
 
+
 @dataclass
 class PluginRequest:
     """Message sent from parent to the plugin subprocess."""
-    method: str                         # "invoke"
-    plugin_module: str                  # e.g. "app.plugins.weather_plugin"
-    function_name: str                  # e.g. "get_weather"
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+
+    method: str  # "invoke"
+    plugin_module: str  # e.g. "app.plugins.weather_plugin"
+    function_name: str  # e.g. "get_weather"
+    kwargs: dict[str, Any] = field(default_factory=dict)
     request_id: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "PluginRequest":
+    def from_dict(cls, d: dict) -> PluginRequest:
         return cls(
             method=d.get("method", "invoke"),
             plugin_module=d.get("plugin_module", ""),
@@ -80,10 +82,11 @@ class PluginRequest:
 @dataclass
 class PluginResponse:
     """Message sent from the plugin subprocess back to the parent."""
+
     success: bool = False
     result: Any = None
-    error: Optional[str] = None
-    error_type: Optional[str] = None
+    error: str | None = None
+    error_type: str | None = None
     execution_time_ms: float = 0.0
     stdout: str = ""
     stderr: str = ""
@@ -93,7 +96,7 @@ class PluginResponse:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "PluginResponse":
+    def from_dict(cls, d: dict) -> PluginResponse:
         return cls(
             success=d.get("success", False),
             result=d.get("result"),

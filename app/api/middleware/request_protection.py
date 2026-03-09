@@ -6,29 +6,29 @@ Features:
     • Per-request timeout (default 60 s)
     • Abuse detection heuristics with structured logging
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Optional
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.status import HTTP_408_REQUEST_TIMEOUT, HTTP_413_REQUEST_ENTITY_TOO_LARGE
 
-from app.config.settings import settings
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
 # ── Defaults (overridable via settings / env) ─────────────────────
 
-MAX_BODY_BYTES: int = 1 * 1024 * 1024       # 1 MB
-REQUEST_TIMEOUT_SECONDS: float = 60.0        # 60 s
+MAX_BODY_BYTES: int = 1 * 1024 * 1024  # 1 MB
+REQUEST_TIMEOUT_SECONDS: float = 60.0  # 60 s
 
 
 # ── Request size limit middleware ─────────────────────────────────
+
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     """Reject requests whose Content-Length exceeds the cap."""
@@ -59,6 +59,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
 # ── Timeout middleware ────────────────────────────────────────────
 
+
 class TimeoutMiddleware(BaseHTTPMiddleware):
     """Cancel requests that exceed the timeout threshold."""
 
@@ -68,10 +69,8 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         try:
-            return await asyncio.wait_for(
-                call_next(request), timeout=self.timeout
-            )
-        except asyncio.TimeoutError:
+            return await asyncio.wait_for(call_next(request), timeout=self.timeout)
+        except TimeoutError:
             client = request.client.host if request.client else "unknown"
             _LOG.warning(
                 "Request timed out after %.1fs: %s %s from %s",
@@ -93,9 +92,9 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 # ── Abuse detection middleware ────────────────────────────────────
 
 # Thresholds for abuse heuristics
-_ABUSE_RAPID_WINDOW = 5.0         # seconds
-_ABUSE_RAPID_COUNT = 20           # requests in window
-_ABUSE_LARGE_BODY_THRESHOLD = 512 * 1024   # 512 KB
+_ABUSE_RAPID_WINDOW = 5.0  # seconds
+_ABUSE_RAPID_COUNT = 20  # requests in window
+_ABUSE_LARGE_BODY_THRESHOLD = 512 * 1024  # 512 KB
 
 # In-memory per-IP tracker (lightweight; heavy abuse goes to rate limiter)
 _ip_tracker: dict[str, list[float]] = {}

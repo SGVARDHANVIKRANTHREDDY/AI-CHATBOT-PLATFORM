@@ -16,20 +16,23 @@ PLACEHOLDER_PATTERNS = {
 
 # File types to scan
 SCAN_EXTENSIONS = [
-    ".py", ".js", ".ts", ".json", ".yaml", ".yml",
-    ".env", ".txt", ".md", ".toml", ".ini", ".cfg",
-    ".dockerfile", ".sh"
+    ".py",
+    ".js",
+    ".ts",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".env",
+    ".txt",
+    ".md",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".dockerfile",
+    ".sh",
 ]
 
-EXCLUDE_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "dist",
-    "build"
-}
+EXCLUDE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
 
 results = []
 
@@ -40,25 +43,19 @@ def should_scan_file(filename):
 
 def scan_file(filepath):
     try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        with open(filepath, encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
-    except:
+    except Exception:
         return
 
     for i, line in enumerate(lines, 1):
         for category, pattern in PLACEHOLDER_PATTERNS.items():
             if re.search(pattern, line, re.IGNORECASE):
-                results.append({
-                    "file": filepath,
-                    "line": i,
-                    "type": category,
-                    "content": line.strip()
-                })
+                results.append({"file": filepath, "line": i, "type": category, "content": line.strip()})
 
 
 def scan_workspace(root):
     for root_dir, dirs, files in os.walk(root):
-
         # remove excluded directories
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
 
@@ -69,7 +66,6 @@ def scan_workspace(root):
 
 def write_report():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-
         f.write("=== PLACEHOLDER DETECTION REPORT ===\n\n")
 
         if not results:
@@ -78,10 +74,10 @@ def write_report():
 
         for r in results:
             f.write(f"""
-File: {r['file']}
-Line: {r['line']}
-Type: {r['type']}
-Content: {r['content']}
+File: {r["file"]}
+Line: {r["line"]}
+Type: {r["type"]}
+Content: {r["content"]}
 -----------------------------------------
 """)
 
@@ -92,6 +88,3 @@ if __name__ == "__main__":
     project_root = os.getcwd()
     scan_workspace(project_root)
     write_report()
-
-    print("Scan complete.")
-    print(f"Results saved to: {OUTPUT_FILE}")

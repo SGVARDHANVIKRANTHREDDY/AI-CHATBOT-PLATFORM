@@ -1,17 +1,20 @@
 from __future__ import annotations
+
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
-from app.api.schemas.chat import ChatRequest, ChatResponse, ErrorResponse
+from fastapi.responses import StreamingResponse
+
 from app.api.dependencies.providers import get_chat_orchestrator
+from app.api.schemas.chat import ChatRequest, ChatResponse
 from app.orchestrator.chat_orchestrator import ChatOrchestrator
 from app.shared.types import AnswerContract, Citation
 
 router = APIRouter()
 
+
 @router.post("/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    orchestrator: ChatOrchestrator = Depends(get_chat_orchestrator)
-):
+async def chat(request: ChatRequest, orchestrator: ChatOrchestrator = Depends(get_chat_orchestrator)):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
@@ -21,14 +24,11 @@ async def chat(
         use_rag=request.use_rag,
         use_web=request.use_web,
         rag_top_k=request.rag_top_k,
-        system_prompt=request.system_prompt
+        system_prompt=request.system_prompt,
     )
 
     raw_citations = result.get("citations") or []
-    citations = [
-        Citation(**c) if isinstance(c, dict) else c
-        for c in raw_citations
-    ]
+    citations = [Citation(**c) if isinstance(c, dict) else c for c in raw_citations]
 
     return ChatResponse(
         ok=True,
@@ -44,24 +44,18 @@ async def chat(
     )
 
 
-from fastapi.responses import StreamingResponse
-import json
-
 @router.post("/chat/stream")
-async def chat_stream(
-    request: ChatRequest,
-    orchestrator: ChatOrchestrator = Depends(get_chat_orchestrator)
-):
+async def chat_stream(request: ChatRequest, orchestrator: ChatOrchestrator = Depends(get_chat_orchestrator)):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     async def event_generator():
-        final_prompt, sys_prompt, context_data = await orchestrator.pipeline.gather_context(
+        final_prompt, sys_prompt, _context_data = await orchestrator.pipeline.gather_context(
             request.question,
             use_rag=request.use_rag,
             use_web=request.use_web,
             rag_top_k=request.rag_top_k,
-            system_prompt=request.system_prompt
+            system_prompt=request.system_prompt,
         )
 
         async for chunk in orchestrator.llm.ask_stream(final_prompt, system_prompt=sys_prompt):
@@ -70,4 +64,3 @@ async def chat_stream(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-

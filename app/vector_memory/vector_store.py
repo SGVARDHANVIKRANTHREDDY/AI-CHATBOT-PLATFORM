@@ -9,21 +9,19 @@ The backend is selected by the ``VECTOR_BACKEND`` setting:
     "qdrant" → QdrantVectorStore (production)
     "faiss"  → FAISSVectorStore  (development / offline)
 """
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
-import numpy as np
+from datetime import UTC, datetime
+from typing import Any
 
 from app.config.settings import settings
 from app.shared.utils import get_logger
-from app.vector_memory.base import SearchResult, VectorRecord, VectorStore
+from app.vector_memory.base import SearchResult, VectorStore
+from app.vector_memory.embeddings import embedding_service
 
 _LOG = get_logger(__name__)
-
-from app.vector_memory.embeddings import embedding_service
 
 
 def _create_backend(memory_type: str) -> VectorStore:
@@ -65,7 +63,7 @@ class VectorMemory:
             await self._store.initialize()
             self._initialized = True
 
-    async def add(self, text: str, metadata: Optional[Dict[str, Any]] = None):
+    async def add(self, text: str, metadata: dict[str, Any] | None = None):
         """Adds a new memory to the store."""
         await self._ensure_init()
 
@@ -77,28 +75,28 @@ class VectorMemory:
             embedding=emb,
             text=text,
             metadata={
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "memory_type": self.memory_type,
                 **(metadata or {}),
             },
         )
         _LOG.info("Added %s memory: %s…", self.memory_type, text[:50])
 
-    async def search(
-        self, query: str, top_k: int = settings.VECTOR_MEMORY_TOP_K
-    ) -> List[Dict[str, Any]]:
+    async def search(self, query: str, top_k: int = settings.VECTOR_MEMORY_TOP_K) -> list[dict[str, Any]]:
         """Searches for similar memories."""
         await self._ensure_init()
 
         q_emb = embedding_service.encode_single(query)
-        results: List[SearchResult] = await self._store.search(q_emb, top_k=top_k)
+        results: list[SearchResult] = await self._store.search(q_emb, top_k=top_k)
 
-        hits: List[Dict[str, Any]] = []
+        hits: list[dict[str, Any]] = []
         for r in results:
-            hits.append({
-                "text": r.text,
-                "score": r.score,
-                "metadata": r.metadata,
-                "timestamp": r.metadata.get("timestamp", ""),
-            })
+            hits.append(
+                {
+                    "text": r.text,
+                    "score": r.score,
+                    "metadata": r.metadata,
+                    "timestamp": r.metadata.get("timestamp", ""),
+                }
+            )
         return hits

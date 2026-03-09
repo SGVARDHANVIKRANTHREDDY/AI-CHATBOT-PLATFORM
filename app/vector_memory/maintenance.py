@@ -16,17 +16,16 @@ Design rationale:
     embeddings waste memory and skew similarity scores.  Stale entries
     from outdated conversations pollute results.
 """
+
 from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import faiss
 import numpy as np
-
 from app.config.settings import settings
 from app.shared.utils import get_logger
 
@@ -61,7 +60,7 @@ class VectorMaintenanceManager:
 
     # ── Public API ────────────────────────────────────────────────
 
-    def run_full_maintenance(self) -> Dict[str, Any]:
+    def run_full_maintenance(self) -> dict[str, Any]:
         """Execute all maintenance tasks in sequence.
 
         Returns:
@@ -70,7 +69,7 @@ class VectorMaintenanceManager:
         start = time.perf_counter()
         _LOG.info("Starting full maintenance for '%s'", self.memory_type)
 
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "memory_type": self.memory_type,
             "stale_removed": 0,
             "duplicates_removed": 0,
@@ -126,9 +125,9 @@ class VectorMaintenanceManager:
             self._reindex(memories)
         return count
 
-    def remove_stale(self, max_age_days: Optional[int] = None) -> int:
+    def remove_stale(self, max_age_days: int | None = None) -> int:
         """Remove memories older than cutoff. Returns count removed."""
-        index, memories = self._load()
+        _index, memories = self._load()
         if not memories:
             return 0
         orig_days = self.stale_days
@@ -153,7 +152,7 @@ class VectorMaintenanceManager:
     def _load(self):
         """Load FAISS index and metadata from disk."""
         index = None
-        memories: List[Dict[str, Any]] = []
+        memories: list[dict[str, Any]] = []
 
         if self.faiss_path.exists():
             try:
@@ -163,14 +162,14 @@ class VectorMaintenanceManager:
 
         if self.meta_path.exists():
             try:
-                with open(self.meta_path, "r", encoding="utf-8") as f:
+                with open(self.meta_path, encoding="utf-8") as f:
                     memories = json.load(f)
             except Exception as e:
                 _LOG.error("Failed to load memory metadata: %s", e)
 
         return index, memories
 
-    def _save_metadata(self, memories: List[Dict[str, Any]]) -> None:
+    def _save_metadata(self, memories: list[dict[str, Any]]) -> None:
         """Save metadata to disk."""
         try:
             with open(self.meta_path, "w", encoding="utf-8") as f:
@@ -178,19 +177,17 @@ class VectorMaintenanceManager:
         except Exception as e:
             _LOG.error("Failed to save metadata: %s", e)
 
-    def _remove_stale(
-        self, memories: List[Dict[str, Any]]
-    ) -> tuple:
+    def _remove_stale(self, memories: list[dict[str, Any]]) -> tuple:
         """Remove memories older than stale_days."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.stale_days)
-        kept: List[Dict[str, Any]] = []
+        cutoff = datetime.now(UTC) - timedelta(days=self.stale_days)
+        kept: list[dict[str, Any]] = []
         removed = 0
 
         for mem in memories:
             try:
                 ts = datetime.fromisoformat(mem.get("timestamp", ""))
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
                 if ts >= cutoff:
                     kept.append(mem)
                 else:
@@ -207,9 +204,7 @@ class VectorMaintenanceManager:
             )
         return kept, removed
 
-    def _deduplicate(
-        self, index: faiss.Index, memories: List[Dict[str, Any]]
-    ) -> tuple:
+    def _deduplicate(self, index: faiss.Index, memories: list[dict[str, Any]]) -> tuple:
         """Remove near-duplicate vectors using cosine similarity."""
         n = index.ntotal
         if n <= 1 or n != len(memories):
@@ -225,7 +220,7 @@ class VectorMaintenanceManager:
             return memories, 0
 
         # Find duplicates via pairwise similarity
-        duplicates: Set[int] = set()
+        duplicates: set[int] = set()
         for i in range(n):
             if i in duplicates:
                 continue
@@ -243,7 +238,7 @@ class VectorMaintenanceManager:
         _LOG.info("Deduplicated: removed %d duplicates", len(duplicates))
         return kept, len(duplicates)
 
-    def _reindex(self, memories: List[Dict[str, Any]]) -> None:
+    def _reindex(self, memories: list[dict[str, Any]]) -> None:
         """Rebuild the FAISS index from remaining memories."""
         from app.vector_memory.embeddings import embedding_service
 
@@ -270,21 +265,21 @@ class VectorMaintenanceManager:
             new_index.d,
         )
 
-    def _compress_old_vectors(self, memories: List[Dict[str, Any]]) -> int:
+    def _compress_old_vectors(self, memories: list[dict[str, Any]]) -> int:
         """Flag old memories as compressed (precision reduction for storage).
 
         Note: FAISS IndexFlatIP always stores float32 internally.
         This method marks old entries so future reindex operations
         can use a quantized index type (e.g. IndexIVFPQ) for them.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.compress_days)
+        cutoff = datetime.now(UTC) - timedelta(days=self.compress_days)
         compressed = 0
 
         for mem in memories:
             try:
                 ts = datetime.fromisoformat(mem.get("timestamp", ""))
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
                 if ts < cutoff and not mem.get("metadata", {}).get("compressed"):
                     mem.setdefault("metadata", {})["compressed"] = True
                     compressed += 1

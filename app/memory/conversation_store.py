@@ -1,18 +1,21 @@
 from __future__ import annotations
+
+from typing import Any
+
 import asyncpg
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+
 from app.config.settings import settings
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
+
 class ConversationStore:
     """PostgreSQL-based long-term conversation store."""
-    
+
     def __init__(self, dsn: str = settings.POSTGRES_URL):
         self._dsn = dsn
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: asyncpg.Pool | None = None
 
     async def _get_pool(self) -> asyncpg.Pool:
         if self._pool is None:
@@ -42,21 +45,23 @@ class ConversationStore:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO interactions(session_id, role, content) VALUES($1, $2, $3)",
-                    session_id, role, content
+                    "INSERT INTO interactions(session_id, role, content) VALUES($1, $2, $3)", session_id, role, content
                 )
         except Exception as e:
             _LOG.error(f"Postgres save failed: {e}")
 
-    async def get_history(self, session_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    async def get_history(self, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT role, content, created_at FROM interactions WHERE session_id = $1 ORDER BY created_at DESC LIMIT $2",
-                    session_id, limit
+                    session_id,
+                    limit,
                 )
-                return [{"role": r["role"], "content": r["content"], "created_at": r["created_at"]} for r in reversed(rows)]
+                return [
+                    {"role": r["role"], "content": r["content"], "created_at": r["created_at"]} for r in reversed(rows)
+                ]
         except Exception as e:
             _LOG.error(f"Postgres get history failed: {e}")
             return []

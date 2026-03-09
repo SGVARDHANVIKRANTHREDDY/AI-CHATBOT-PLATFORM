@@ -1,17 +1,18 @@
 from __future__ import annotations
-import asyncio
+
 import time
-from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
-from app.shared.utils import get_logger
+from typing import Any
+
 from app.security.content_safety import ContentSafetyFilter
+from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
 # ─── Rate & Safety Limits ─────────────────────────────────────────
 DEFAULT_CRAWL_FREQUENCY_SECONDS = 3600  # 1 hour between crawls
-DEFAULT_DOCUMENT_SIZE_LIMIT = 500_000   # 500KB max per document
-DEFAULT_SOURCE_WHITELIST: List[str] = [
+DEFAULT_DOCUMENT_SIZE_LIMIT = 500_000  # 500KB max per document
+DEFAULT_SOURCE_WHITELIST: list[str] = [
     "docs.python.org",
     "arxiv.org",
     "github.com",
@@ -20,14 +21,16 @@ DEFAULT_SOURCE_WHITELIST: List[str] = [
     "fastapi.tiangolo.com",
 ]
 
+
 @dataclass
 class CrawlConfig:
     """Configuration for knowledge crawling with safety limits."""
+
     crawl_frequency: int = DEFAULT_CRAWL_FREQUENCY_SECONDS
-    source_whitelist: List[str] = field(default_factory=lambda: DEFAULT_SOURCE_WHITELIST.copy())
+    source_whitelist: list[str] = field(default_factory=lambda: DEFAULT_SOURCE_WHITELIST.copy())
     document_size_limit: int = DEFAULT_DOCUMENT_SIZE_LIMIT
     max_pages_per_crawl: int = 20
-    enabled_sources: List[str] = field(default_factory=lambda: ["rss", "docs"])
+    enabled_sources: list[str] = field(default_factory=lambda: ["rss", "docs"])
 
 
 class KnowledgeCrawler:
@@ -35,11 +38,11 @@ class KnowledgeCrawler:
     Crawls, validates, and ingests knowledge from allowed sources.
     Respects rate limits and content size restrictions.
     """
-    
-    def __init__(self, config: Optional[CrawlConfig] = None):
+
+    def __init__(self, config: CrawlConfig | None = None):
         self.config = config or CrawlConfig()
-        self._last_crawl: Dict[str, float] = {}  # source -> timestamp
-        self._crawled_urls: Set[str] = set()
+        self._last_crawl: dict[str, float] = {}  # source -> timestamp
+        self._crawled_urls: set[str] = set()
         self.safety_filter = ContentSafetyFilter()
 
     def _is_whitelisted(self, url: str) -> bool:
@@ -51,16 +54,16 @@ class KnowledgeCrawler:
         last = self._last_crawl.get(source, 0)
         return (time.time() - last) < self.config.crawl_frequency
 
-    async def crawl_url(self, url: str) -> Optional[Dict[str, Any]]:
+    async def crawl_url(self, url: str) -> dict[str, Any] | None:
         """Crawl a single URL with safety checks."""
         if not self._is_whitelisted(url):
             _LOG.warning(f"URL not whitelisted, skipping: {url}")
             return None
-            
+
         if url in self._crawled_urls:
             _LOG.debug(f"Already crawled: {url}")
             return None
-            
+
         domain = url.split("/")[2] if "/" in url else url
         if self._is_rate_limited(domain):
             _LOG.info(f"Rate limited for domain: {domain}")
@@ -70,29 +73,23 @@ class KnowledgeCrawler:
         try:
             # Simulated crawl — in production, use aiohttp
             content = f"[Simulated content from {url}]"
-            
+
             if len(content) > self.config.document_size_limit:
                 _LOG.warning(f"Document too large ({len(content)} bytes): {url}")
-                content = content[:self.config.document_size_limit]
-            
+                content = content[: self.config.document_size_limit]
+
             self._crawled_urls.add(url)
             self._last_crawl[domain] = time.time()
-            
-            return {
-                "url": url,
-                "content": content,
-                "domain": domain,
-                "size": len(content),
-                "timestamp": time.time()
-            }
+
+            return {"url": url, "content": content, "domain": domain, "size": len(content), "timestamp": time.time()}
         except Exception as e:
             _LOG.error(f"Crawl failed for {url}: {e}")
             return None
 
-    async def crawl_batch(self, urls: List[str]) -> List[Dict[str, Any]]:
+    async def crawl_batch(self, urls: list[str]) -> list[dict[str, Any]]:
         """Crawl multiple URLs with limits and safety filtering."""
         results = []
-        for url in urls[:self.config.max_pages_per_crawl]:
+        for url in urls[: self.config.max_pages_per_crawl]:
             result = await self.crawl_url(url)
             if result:
                 doc = {"text": result["content"], "source": result["url"], "domain": result["domain"]}

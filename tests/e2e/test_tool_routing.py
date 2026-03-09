@@ -4,23 +4,19 @@ E2E Test: Tool Routing and Sandbox Enforcement
 Tests tool detection, plugin sandbox security restrictions,
 and response validation for hallucinated tool calls.
 """
+
 from __future__ import annotations
 
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-from app.reliability.response_guard import ResponseValidator, ValidationResult
 from app.plugins.sandbox.sandbox_runner import (
-    SandboxRunner,
-    SandboxResult,
-    SandboxSecurityError,
     ALLOWED_MODULES,
     BLOCKED_MODULES,
+    SandboxRunner,
 )
-
+from app.reliability.response_guard import ResponseValidator
 
 # ── Fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def sandbox():
@@ -37,12 +33,14 @@ def response_validator():
 
 # ── Sandbox Tests ─────────────────────────────────────────────────
 
+
 class TestSandboxRunner:
     """Tests for the plugin sandbox execution environment."""
 
     @pytest.mark.asyncio
     async def test_safe_function_executes(self, sandbox):
         """Safe plugin functions run and return results."""
+
         def safe_plugin(x=1, y=2):
             return x + y
 
@@ -53,6 +51,7 @@ class TestSandboxRunner:
     @pytest.mark.asyncio
     async def test_async_function_executes(self, sandbox):
         """Async plugin functions are also supported."""
+
         async def async_plugin(msg="hello"):
             return f"async: {msg}"
 
@@ -76,6 +75,7 @@ class TestSandboxRunner:
     @pytest.mark.asyncio
     async def test_exception_handling(self, sandbox):
         """Plugin exceptions are caught and reported."""
+
         def bad_plugin():
             raise ValueError("plugin crashed")
 
@@ -105,7 +105,7 @@ class TestSandboxRunner:
 
     def test_source_validation_allows_safe_code(self, sandbox):
         """Clean plugin code passes validation."""
-        source = '''
+        source = """
 import json
 import math
 
@@ -113,7 +113,7 @@ def register_tools():
     def calculate(expression="1+1"):
         return eval(expression)  # This will be blocked
     return {"calculate": calculate}
-'''
+"""
         violations = sandbox.validate_plugin_source(source)
         # eval( is in the source but our check looks for "eval(" specifically
         assert any("eval(" in v for v in violations)
@@ -130,6 +130,7 @@ def register_tools():
 
 
 # ── Response Validator Tests ──────────────────────────────────────
+
 
 class TestResponseValidator:
     """Tests for the LLM response validation layer."""

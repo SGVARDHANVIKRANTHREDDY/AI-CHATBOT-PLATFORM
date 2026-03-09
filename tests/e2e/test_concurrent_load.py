@@ -4,24 +4,25 @@ E2E Test: Concurrent Load Simulation
 Simulates 100 concurrent requests through the load guard,
 validates graceful degradation, and measures throughput.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
-import pytest
-from typing import List
 
-from app.reliability.load_guard import (
-    RequestQueueLimiter,
-    AgentExecutionLimiter,
-    SwarmThrottle,
-    LoadGuardRejection,
-)
+import pytest
 from app.reliability.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 from app.reliability.failure_tracker import FailureTracker
-
+from app.reliability.load_guard import (
+    AgentExecutionLimiter,
+    LoadGuardRejectionError,
+    RequestQueueLimiter,
+    SwarmThrottle,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def load_system():
@@ -29,13 +30,12 @@ def load_system():
     return {
         "request_limiter": RequestQueueLimiter(max_concurrent=20, queue_timeout=2.0),
         "agent_limiter": AgentExecutionLimiter(max_agents=10, queue_timeout=2.0),
-        "circuit_breaker": CircuitBreaker(
-            "load_test_llm", failure_threshold=10, recovery_timeout=5.0
-        ),
+        "circuit_breaker": CircuitBreaker("load_test_llm", failure_threshold=10, recovery_timeout=5.0),
     }
 
 
 # ── Concurrent Load Tests ────────────────────────────────────────
+
 
 class TestConcurrentLoad:
     """Tests simulating heavy concurrent load on the system."""
@@ -44,18 +44,19 @@ class TestConcurrentLoad:
     async def test_50_concurrent_requests(self, load_system):
         """50 concurrent requests with 20 slots — some should queue, all complete."""
         limiter = load_system["request_limiter"]
-        results: List[str] = []
-        errors: List[str] = []
+        results: list[str] = []
+        errors: list[str] = []
 
         async def simulate_request(idx: int):
             try:
+
                 async def work():
                     await asyncio.sleep(0.05)  # Simulate fast work
                     return f"result_{idx}"
 
                 result = await limiter.execute(work)
                 results.append(result)
-            except LoadGuardRejection:
+            except LoadGuardRejectionError:
                 errors.append(f"rejected_{idx}")
 
         tasks = [asyncio.create_task(simulate_request(i)) for i in range(50)]
@@ -76,13 +77,14 @@ class TestConcurrentLoad:
         async def simulate_request(idx: int):
             nonlocal succeeded, rejected
             try:
+
                 async def work():
                     await asyncio.sleep(0.15)  # 150ms work per request
                     return "ok"
 
                 await limiter.execute(work)
                 succeeded += 1
-            except LoadGuardRejection:
+            except LoadGuardRejectionError:
                 rejected += 1
 
         tasks = [asyncio.create_task(simulate_request(i)) for i in range(100)]
@@ -109,20 +111,18 @@ class TestConcurrentLoad:
             async with lock:
                 current_concurrent += 1
                 max_concurrent_seen = max(max_concurrent_seen, current_concurrent)
-            
+
             await asyncio.sleep(0.05)
-            
+
             async with lock:
                 current_concurrent -= 1
 
         tasks = []
         for i in range(20):
-            tasks.append(asyncio.create_task(
-                limiter.execute(simulate_agent, i)
-            ))
+            tasks.append(asyncio.create_task(limiter.execute(simulate_agent, i)))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Max concurrent should not exceed the limit
         assert max_concurrent_seen <= 5
         # Some tasks may have been rejected
@@ -149,7 +149,7 @@ class TestConcurrentLoad:
             raise ConnectionError("provider down")
 
         # Phase 1: Calls fail until circuit opens
-        for i in range(10):
+        for _i in range(10):
             try:
                 await cb.call(flaky_provider)
             except ConnectionError:
@@ -203,6 +203,7 @@ class TestConcurrentLoad:
 
         async def full_request(idx: int):
             nonlocal completed
+
             async def agent_work():
                 await asyncio.sleep(0.01)  # 10ms agent work
                 return "done"
@@ -216,7 +217,7 @@ class TestConcurrentLoad:
 
         tasks = [asyncio.create_task(full_request(i)) for i in range(50)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         elapsed = time.perf_counter() - start
         succeeded = sum(1 for r in results if not isinstance(r, Exception))
 
@@ -235,10 +236,8 @@ class TestConcurrentLoad:
 
         # Fill and release slots via exceptions
         for _ in range(25):
-            try:
+            with contextlib.suppress(ValueError):
                 await limiter.execute(failing_work)
-            except ValueError:
-                pass
 
         # All slots should be available again
         assert limiter.active_requests == 0
@@ -247,16 +246,18 @@ class TestConcurrentLoad:
     async def test_graceful_degradation_response_time(self):
         """Under heavy load, requests are either served or rejected quickly."""
         limiter = RequestQueueLimiter(max_concurrent=5, queue_timeout=0.5)
-        response_times: List[float] = []
+        response_times: list[float] = []
 
         async def timed_request(idx: int):
             start = time.perf_counter()
             try:
+
                 async def work():
                     await asyncio.sleep(0.2)
                     return "ok"
+
                 await limiter.execute(work)
-            except LoadGuardRejection:
+            except LoadGuardRejectionError:
                 pass
             finally:
                 elapsed = time.perf_counter() - start

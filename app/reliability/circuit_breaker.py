@@ -18,13 +18,14 @@ Design rationale:
     • Integrates with FailureTracker for shared failure intelligence.
     • Emits Prometheus metrics on every state change.
 """
+
 from __future__ import annotations
 
-import asyncio
 import enum
-import time
 import threading
-from typing import Any, Callable, Coroutine, Optional, TypeVar
+import time
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 from app.reliability.failure_tracker import FailureTracker
 from app.shared.utils import get_logger
@@ -36,6 +37,7 @@ T = TypeVar("T")
 
 class CircuitState(enum.Enum):
     """Possible states of the circuit breaker."""
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -47,9 +49,7 @@ class CircuitOpenError(Exception):
     def __init__(self, component: str, retry_after: float) -> None:
         self.component = component
         self.retry_after = retry_after
-        super().__init__(
-            f"Circuit open for '{component}'. Retry after {retry_after:.1f}s."
-        )
+        super().__init__(f"Circuit open for '{component}'. Retry after {retry_after:.1f}s.")
 
 
 class CircuitBreaker:
@@ -80,8 +80,8 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
         half_open_max_calls: int = 3,
-        tracker: Optional[FailureTracker] = None,
-        fallback: Optional[Callable[..., Coroutine[Any, Any, Any]]] = None,
+        tracker: FailureTracker | None = None,
+        fallback: Callable[..., Coroutine[Any, Any, Any]] | None = None,
     ) -> None:
         self.component_name = component_name
         self.failure_threshold = failure_threshold
@@ -105,10 +105,7 @@ class CircuitBreaker:
     def state(self) -> CircuitState:
         """Current state, accounting for automatic OPEN → HALF_OPEN transition."""
         with self._lock:
-            if (
-                self._state == CircuitState.OPEN
-                and time.monotonic() - self._opened_at >= self.recovery_timeout
-            ):
+            if self._state == CircuitState.OPEN and time.monotonic() - self._opened_at >= self.recovery_timeout:
                 self._transition(CircuitState.HALF_OPEN)
             return self._state
 
@@ -152,13 +149,9 @@ class CircuitBreaker:
 
     async def _handle_open(self, *args: Any, **kwargs: Any) -> Any:
         """Called when circuit is OPEN — use fallback or raise."""
-        retry_after = self.recovery_timeout - (
-            time.monotonic() - self._opened_at
-        )
+        retry_after = self.recovery_timeout - (time.monotonic() - self._opened_at)
         if self.fallback is not None:
-            _LOG.info(
-                "Circuit OPEN for %s — invoking fallback", self.component_name
-            )
+            _LOG.info("Circuit OPEN for %s — invoking fallback", self.component_name)
             return await self.fallback(*args, **kwargs)
         raise CircuitOpenError(self.component_name, max(retry_after, 0.0))
 
@@ -200,10 +193,9 @@ class CircuitBreaker:
         """Emit Prometheus counter for state transitions."""
         try:
             from app.shared.monitoring import CIRCUIT_BREAKER_STATE_CHANGES
-            CIRCUIT_BREAKER_STATE_CHANGES.labels(
-                component=self.component_name, state=new_state.value
-            ).inc()
-        except Exception:
+
+            CIRCUIT_BREAKER_STATE_CHANGES.labels(component=self.component_name, state=new_state.value).inc()
+        except Exception:  # noqa: S110
             pass  # Metrics are best-effort
 
     # ── Manual controls ───────────────────────────────────────────

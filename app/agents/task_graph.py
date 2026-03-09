@@ -1,36 +1,39 @@
 from __future__ import annotations
-from typing import List, Dict, Any, Optional
+
+from typing import Any
+
 from pydantic import BaseModel, Field
+
 
 class TaskNode(BaseModel):
     """Represents a single step in the agentic plan."""
+
     id: str
     agent: str  # e.g., "research_agent", "reasoning_agent", "coding_agent"
     task: str
-    dependencies: List[str] = Field(default_factory=list)
-    result: Optional[Any] = None
-    status: str = "pending" # pending, running, completed, failed
+    dependencies: list[str] = Field(default_factory=list)
+    result: Any | None = None
+    status: str = "pending"  # pending, running, completed, failed
+
 
 class TaskGraph(BaseModel):
     """
     A Directed Acyclic Graph (DAG) for task orchestration.
     """
-    nodes: Dict[str, TaskNode] = Field(default_factory=dict)
-    
+
+    nodes: dict[str, TaskNode] = Field(default_factory=dict)
+
     def add_node(self, node: TaskNode):
         self.nodes[node.id] = node
 
-    def get_ready_tasks(self) -> List[TaskNode]:
+    def get_ready_tasks(self) -> list[TaskNode]:
         """Returns tasks whose dependencies are all completed."""
         ready = []
         for node in self.nodes.values():
             if node.status != "pending":
                 continue
-            
-            deps_met = all(
-                self.nodes[dep].status == "completed" 
-                for dep in node.dependencies
-            )
+
+            deps_met = all(self.nodes[dep].status == "completed" for dep in node.dependencies)
             if deps_met:
                 ready.append(node)
         return ready
@@ -43,5 +46,5 @@ class TaskGraph(BaseModel):
     def is_complete(self) -> bool:
         return all(node.status == "completed" for node in self.nodes.values())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {nid: node.model_dump() for nid, node in self.nodes.items()}

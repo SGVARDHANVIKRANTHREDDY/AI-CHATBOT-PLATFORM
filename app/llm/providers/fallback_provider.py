@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import time
-from typing import AsyncIterator, List, Optional, Dict
+from collections.abc import AsyncIterator
+
 from app.llm.base import LLMProvider
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
+
 
 class CircuitBreaker:
     def __init__(self, failure_threshold: int = 3, recovery_timeout: int = 60):
@@ -12,7 +15,7 @@ class CircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self.failure_count = 0
         self.last_failure_time = 0
-        self.state = "CLOSED" # CLOSED, OPEN, HALF-OPEN
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF-OPEN
 
     def is_available(self) -> bool:
         if self.state == "OPEN":
@@ -33,15 +36,14 @@ class CircuitBreaker:
             self.state = "OPEN"
             _LOG.error(f"Circuit breaker TRIPPED! State: {self.state}")
 
+
 class FallbackProvider(LLMProvider):
-    def __init__(self, primary: LLMProvider, fallbacks: List[LLMProvider]):
+    def __init__(self, primary: LLMProvider, fallbacks: list[LLMProvider]):
         self.primary = primary
         self.fallbacks = fallbacks
-        self.breakers: Dict[LLMProvider, CircuitBreaker] = {
-            p: CircuitBreaker() for p in ([primary] + fallbacks)
-        }
+        self.breakers: dict[LLMProvider, CircuitBreaker] = {p: CircuitBreaker() for p in ([primary, *fallbacks])}
 
-    async def ask(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
+    async def ask(self, prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
         # Try primary first if available
         if self.breakers[self.primary].is_available():
             try:
@@ -51,7 +53,7 @@ class FallbackProvider(LLMProvider):
             except Exception as e:
                 _LOG.warning(f"Primary provider failed: {e}. Recording failure.")
                 self.breakers[self.primary].record_failure()
-        
+
         # Try fallbacks
         for fallback in self.fallbacks:
             if self.breakers[fallback].is_available():
@@ -62,10 +64,12 @@ class FallbackProvider(LLMProvider):
                 except Exception as fe:
                     _LOG.error(f"Fallback provider failed: {fe}. Recording failure.")
                     self.breakers[fallback].record_failure()
-        
+
         raise RuntimeError("All LLM providers are currently unavailable or circuit-broken.")
 
-    async def ask_stream(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> AsyncIterator[str]:
+    async def ask_stream(
+        self, prompt: str, system_prompt: str | None = None, model: str | None = None
+    ) -> AsyncIterator[str]:
         # Implementation for streaming fallback with circuit breaker
         if self.breakers[self.primary].is_available():
             try:

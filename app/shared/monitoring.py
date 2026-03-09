@@ -8,27 +8,20 @@ queries, and agent crashes.
 All new metrics follow the Prometheus naming conventions:
     <namespace>_<subsystem>_<name>_<unit>
 """
+
 from __future__ import annotations
-from prometheus_client import Counter, Histogram, Summary, Gauge, generate_latest, CONTENT_TYPE_LATEST
-from fastapi import Response
+
 import time
 
+from fastapi import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+
 # ─── Core Metrics ─────────────────────────────────────────────────
-REQUEST_LATENCY = Histogram(
-    "request_latency_seconds", "Latency of API requests", ["endpoint"]
-)
-LLM_TOKEN_USAGE = Counter(
-    "llm_token_usage_total", "Total tokens consumed", ["model", "type"]
-)
-RAG_HIT_COUNT = Counter(
-    "rag_hits_total", "Total RAG hits retrieved", ["status"]
-)
-CHAT_ERRORS = Counter(
-    "chat_errors_total", "Total errors in chat pipeline", ["type"]
-)
-SEMANTIC_CACHE_HITS = Counter(
-    "semantic_cache_hits_total", "Total semantic cache hits", ["status"]
-)
+REQUEST_LATENCY = Histogram("request_latency_seconds", "Latency of API requests", ["endpoint"])
+LLM_TOKEN_USAGE = Counter("llm_token_usage_total", "Total tokens consumed", ["model", "type"])
+RAG_HIT_COUNT = Counter("rag_hits_total", "Total RAG hits retrieved", ["status"])
+CHAT_ERRORS = Counter("chat_errors_total", "Total errors in chat pipeline", ["type"])
+SEMANTIC_CACHE_HITS = Counter("semantic_cache_hits_total", "Total semantic cache hits", ["status"])
 SEMANTIC_CACHE_LATENCY = Histogram(
     "semantic_cache_latency_seconds",
     "Latency of semantic cache lookups",
@@ -74,45 +67,34 @@ LLM_CALL_DURATION = Histogram(
 
 # ─── AI Telemetry Metrics (Frontier Layer) ────────────────────────
 AI_AGENT_ITERATIONS = Histogram(
-    "ai_agent_iterations", 
-    "Number of reasoning iterations per request",
-    buckets=[1, 2, 3, 5, 8, 10, 15, 20]
+    "ai_agent_iterations", "Number of reasoning iterations per request", buckets=[1, 2, 3, 5, 8, 10, 15, 20]
 )
 TOOL_SELECTION_LATENCY = Histogram(
     "tool_selection_latency_seconds",
     "Latency of neural tool selection",
     ["tool_name"],
-    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0]
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0],
 )
 REASONING_GRAPH_NODES = Histogram(
-    "reasoning_graph_nodes",
-    "Number of nodes in the reasoning graph per request",
-    buckets=[1, 3, 5, 10, 20, 30, 50]
+    "reasoning_graph_nodes", "Number of nodes in the reasoning graph per request", buckets=[1, 3, 5, 10, 20, 30, 50]
 )
 REASONING_GRAPH_DEPTH = Histogram(
-    "reasoning_graph_depth",
-    "Maximum depth of reasoning graph per request",
-    buckets=[1, 2, 3, 5, 7, 10]
+    "reasoning_graph_depth", "Maximum depth of reasoning graph per request", buckets=[1, 2, 3, 5, 7, 10]
 )
 HALLUCINATION_RATE = Counter(
-    "hallucination_detections_total",
-    "Total count of hallucination detections by the critic",
-    ["severity"]
+    "hallucination_detections_total", "Total count of hallucination detections by the critic", ["severity"]
 )
 PROMPT_EVOLUTION_SCORE = Histogram(
     "prompt_evolution_score",
     "Performance score of evolved prompts",
     ["prompt_key"],
-    buckets=[0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 1.0]
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 1.0],
 )
 SWARM_AGENT_COUNT = Histogram(
-    "swarm_agents_active",
-    "Number of concurrent swarm agents per execution",
-    buckets=[1, 2, 3, 5, 8, 10]
+    "swarm_agents_active", "Number of concurrent swarm agents per execution", buckets=[1, 2, 3, 5, 8, 10]
 )
 KNOWLEDGE_BUILDER_DOCS = Counter(
-    "knowledge_builder_documents_ingested_total",
-    "Total documents ingested by the knowledge builder"
+    "knowledge_builder_documents_ingested_total", "Total documents ingested by the knowledge builder"
 )
 
 # ─── Production Hardening Metrics ─────────────────────────────────
@@ -206,7 +188,7 @@ TRUST_EVALUATION_RESULTS = Counter(
 CONTENT_SAFETY_SCANS = Counter(
     "content_safety_scans_total",
     "Documents scanned by the content safety filter",
-    ["result"],   # accepted | rejected | quarantined
+    ["result"],  # accepted | rejected | quarantined
 )
 CONTENT_SAFETY_INJECTION_SCORE = Histogram(
     "content_safety_injection_score",
@@ -246,7 +228,7 @@ def metrics_endpoint():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-class track_latency:
+class TrackLatency:
     def __init__(self, endpoint: str):
         self.endpoint = endpoint
 

@@ -12,10 +12,13 @@ Design rationale:
     TimeoutController provides a clean, reusable API so callers don't
     scatter raw ``asyncio.wait_for`` everywhere.
 """
+
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Coroutine, TypeVar
+import builtins
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 from app.shared.utils import get_logger
 
@@ -30,9 +33,7 @@ class TimeoutError(asyncio.TimeoutError):
     def __init__(self, operation: str, timeout_seconds: float) -> None:
         self.operation = operation
         self.timeout_seconds = timeout_seconds
-        super().__init__(
-            f"Operation '{operation}' timed out after {timeout_seconds:.1f}s"
-        )
+        super().__init__(f"Operation '{operation}' timed out after {timeout_seconds:.1f}s")
 
 
 class TimeoutController:
@@ -73,13 +74,13 @@ class TimeoutController:
                 coro_fn(*args, **kwargs),
                 timeout=self.timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except builtins.TimeoutError:
             _LOG.error(
                 "Timeout: '%s' exceeded %ss limit",
                 self.operation_name,
                 self.timeout_seconds,
             )
-            raise TimeoutError(self.operation_name, self.timeout_seconds)
+            raise TimeoutError(self.operation_name, self.timeout_seconds) from None
 
     async def execute_with_fallback(
         self,
@@ -95,7 +96,7 @@ class TimeoutController:
         """
         try:
             return await self.execute(coro_fn, *args, **kwargs)
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             _LOG.warning(
                 "Timeout fallback: '%s' — returning default value",
                 self.operation_name,

@@ -13,18 +13,17 @@ Usage (CLI)::
 
 Or as a Celery task via ``workers.maintenance_worker``.
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
 import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import faiss
 import numpy as np
-
 from app.config.settings import settings
 from app.shared.utils import get_logger
 from app.vector_memory.base import VectorRecord
@@ -37,7 +36,7 @@ async def migrate_memory_type(
     target_store,
     *,
     embedding_service=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Migrate a single FAISS memory type into *target_store*.
 
     Args:
@@ -53,7 +52,7 @@ async def migrate_memory_type(
     faiss_path = index_dir / "memory.index"
     meta_path = index_dir / "memory_meta.json"
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "memory_type": memory_type,
         "source_count": 0,
         "migrated": 0,
@@ -69,8 +68,8 @@ async def migrate_memory_type(
     # Load FAISS index and metadata
     try:
         index = faiss.read_index(str(faiss_path))
-        with open(meta_path, "r", encoding="utf-8") as f:
-            memories: List[Dict[str, Any]] = json.load(f)
+        with open(meta_path, encoding="utf-8") as f:
+            memories: list[dict[str, Any]] = json.load(f)
     except Exception as e:
         _LOG.error("Failed to load FAISS data for '%s': %s", memory_type, e)
         summary["errors"].append(str(e))
@@ -85,28 +84,27 @@ async def migrate_memory_type(
 
     # Reconstruct vectors from the index
     dim = index.d
-    vectors: Optional[np.ndarray] = None
+    vectors: np.ndarray | None = None
     try:
         vectors = np.zeros((n_vectors, dim), dtype="float32")
         for i in range(n_vectors):
             vectors[i] = index.reconstruct(i)
     except Exception:
-        _LOG.warning(
-            "Cannot reconstruct vectors for '%s' — will re-embed", memory_type
-        )
+        _LOG.warning("Cannot reconstruct vectors for '%s' — will re-embed", memory_type)
         vectors = None
 
     # Re-embed if reconstruction failed
     if vectors is None:
         if embedding_service is None:
             from app.vector_memory.embeddings import embedding_service as _es
+
             embedding_service = _es
 
         texts = [m.get("text", "") for m in memories]
         vectors = embedding_service.encode(texts)
 
     # Build VectorRecord list
-    records: List[VectorRecord] = []
+    records: list[VectorRecord] = []
     for i, mem in enumerate(memories):
         if i >= vectors.shape[0]:
             summary["skipped"] += 1
@@ -141,10 +139,10 @@ async def migrate_memory_type(
 
 
 async def run_migration(
-    memory_types: Optional[List[str]] = None,
+    memory_types: list[str] | None = None,
     qdrant_url: str = "http://localhost:6333",
     collection_name: str = "memories",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run full migration from FAISS to Qdrant.
 
     Args:
@@ -166,7 +164,7 @@ async def run_migration(
     )
     await store.initialize()
 
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
     for mt in types:
         results[mt] = await migrate_memory_type(mt, store)
 
@@ -179,6 +177,7 @@ async def run_migration(
 
 # ── CLI entry point ───────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Migrate FAISS → Qdrant")
     parser.add_argument(
@@ -190,10 +189,7 @@ def main() -> None:
     parser.add_argument("--collection", default="memories")
     args = parser.parse_args()
 
-    result = asyncio.run(
-        run_migration(args.memory_types, args.qdrant_url, args.collection)
-    )
-    print(json.dumps(result, indent=2, default=str))
+    asyncio.run(run_migration(args.memory_types, args.qdrant_url, args.collection))
 
 
 if __name__ == "__main__":

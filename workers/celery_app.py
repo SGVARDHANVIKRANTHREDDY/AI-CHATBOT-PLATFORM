@@ -1,7 +1,8 @@
 from __future__ import annotations
+
+from app.config.settings import settings
 from celery import Celery
 from celery.schedules import crontab
-from app.config.settings import settings
 
 celery_app = Celery(
     "ai_assistant_workers",

@@ -1,17 +1,18 @@
-﻿"""API integration tests - exercising the actual FastAPI app.
+"""API integration tests - exercising the actual FastAPI app.
 
 Dependencies that require real infrastructure (LLM, RAG, Redis) are
 replaced with lightweight in-process stubs via FastAPI dependency
 overrides.
 """
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from fastapi.testclient import TestClient
 
-from app.api.main import app
+import pytest
 from app.api.dependencies.providers import get_chat_orchestrator
+from app.api.main import app
+from fastapi.testclient import TestClient
 
 
 def _mock_orchestrator() -> MagicMock:
@@ -19,22 +20,26 @@ def _mock_orchestrator() -> MagicMock:
     orch = MagicMock()
 
     # /api/v1/chat
-    orch.generate_answer = AsyncMock(return_value={
-        "answer": "dummy-answer",
-        "confidence": "high",
-        "used_rag": False,
-        "rag_score": None,
-        "used_web": False,
-        "citations": [],
-    })
+    orch.generate_answer = AsyncMock(
+        return_value={
+            "answer": "dummy-answer",
+            "confidence": "high",
+            "used_rag": False,
+            "rag_score": None,
+            "used_web": False,
+            "citations": [],
+        }
+    )
 
     # /api/v1/chat/stream
     pipeline = MagicMock()
-    pipeline.gather_context = AsyncMock(return_value=(
-        "prompt text",
-        "system prompt",
-        {"rag_score": None, "rag_citations": [], "rag_hits": [], "web_refs": []},
-    ))
+    pipeline.gather_context = AsyncMock(
+        return_value=(
+            "prompt text",
+            "system prompt",
+            {"rag_score": None, "rag_citations": [], "rag_hits": [], "web_refs": []},
+        )
+    )
     orch.pipeline = pipeline
 
     async def _fake_stream(prompt, *, system_prompt="", model=None):
@@ -60,6 +65,7 @@ def client():
 
 # -- Basic liveness -------------------------------------------------------
 
+
 def test_root_endpoint(client: TestClient):
     r = client.get("/")
     assert r.status_code == 200
@@ -74,11 +80,11 @@ def test_healthz(client: TestClient):
 
 # -- Chat endpoint --------------------------------------------------------
 
+
 def test_chat_returns_contract_shape(client: TestClient):
     r = client.post(
         "/api/v1/chat",
-        json={"question": "What is Python?", "session_id": "t1",
-              "use_rag": False, "use_web": False},
+        json={"question": "What is Python?", "session_id": "t1", "use_rag": False, "use_web": False},
     )
     assert r.status_code == 200
     payload = r.json()
@@ -101,11 +107,11 @@ def test_chat_empty_question_rejected(client: TestClient):
 
 # -- Stream endpoint ------------------------------------------------------
 
+
 def test_chat_stream_returns_sse_text(client: TestClient):
     r = client.post(
         "/api/v1/chat/stream",
-        json={"question": "hello", "session_id": "t1",
-              "use_rag": False, "use_web": False},
+        json={"question": "hello", "session_id": "t1", "use_rag": False, "use_web": False},
     )
     assert r.status_code == 200
     assert "data:" in r.text or "[DONE]" in r.text

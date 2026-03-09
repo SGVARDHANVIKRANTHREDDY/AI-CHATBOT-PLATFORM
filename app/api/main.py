@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import os
-from fastapi import FastAPI, Request, Depends
+
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api.routes import chat
 from app.api.middleware.auth import get_api_key
 from app.api.middleware.correlation import CorrelationMiddleware
 from app.api.middleware.jwt_auth import JWTAuthMiddleware
@@ -15,14 +16,14 @@ from app.api.middleware.request_protection import (
     TimeoutMiddleware,
 )
 from app.api.middleware.token_bucket import (
-    AGENT_BUCKET,
-    GENERAL_BUCKET,
     BucketConfig,
     TokenBucketRateLimiter,
 )
+from app.api.routes import chat
 from app.config.settings import settings
-from app.shared.utils import log_event, get_logger
+from app.shared.monitoring import metrics_endpoint
 from app.shared.tracing import init_tracing
+from app.shared.utils import get_logger, log_event
 
 _LOG = get_logger(__name__)
 
@@ -33,6 +34,7 @@ init_tracing(
     enabled=os.getenv("TRACING_ENABLED", "true").lower() == "true",
 )
 
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -42,10 +44,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
-app = FastAPI(
-    title=f"{settings.ASSISTANT_NAME} API",
-    version="3.0 (Elite AI Assistant Architecture)"
-)
+
+app = FastAPI(title=f"{settings.ASSISTANT_NAME} API", version="3.0 (Elite AI Assistant Architecture)")
+
 
 # 1. Global Exception Handler
 @app.exception_handler(Exception)
@@ -56,9 +57,10 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={
             "ok": False,
             "error": "Internal Server Error",
-            "detail": str(exc) if settings.DEBUG else "An unexpected error occurred."
-        }
+            "detail": str(exc) if settings.DEBUG else "An unexpected error occurred.",
+        },
     )
+
 
 # 2. Add Middlewares (outermost → innermost execution order)
 #    Starlette processes these bottom-to-top, so bottom = first executed.
@@ -118,22 +120,18 @@ async def rate_limit_middleware(request: Request, call_next):
 
 
 # Include routers with global API Key protection
-app.include_router(
-    chat.router,
-    prefix="/api/v1",
-    tags=["Chat"],
-    dependencies=[Depends(get_api_key)]
-)
+app.include_router(chat.router, prefix="/api/v1", tags=["Chat"], dependencies=[Depends(get_api_key)])
 
-from app.shared.monitoring import metrics_endpoint
 
 @app.get("/metrics")
 def get_metrics():
     return metrics_endpoint()
 
+
 @app.get("/")
 def root():
     return {"message": f"{settings.ASSISTANT_NAME} API is running!"}
+
 
 @app.get("/healthz")
 def healthz():

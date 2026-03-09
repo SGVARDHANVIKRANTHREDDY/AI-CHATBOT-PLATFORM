@@ -15,13 +15,14 @@ Span naming convention:
     <component>.<operation>   e.g. "api.request", "agent.plan",
     "tool.execute", "rag.retrieve", "llm.ask"
 """
+
 from __future__ import annotations
 
-import asyncio
 import functools
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, TypeVar
 
 from app.shared.utils import get_logger
 
@@ -36,7 +37,7 @@ _initialized = False
 
 def init_tracing(
     service_name: str = "ai-platform",
-    otlp_endpoint: Optional[str] = None,
+    otlp_endpoint: str | None = None,
     enabled: bool = True,
 ) -> None:
     """Initialize OpenTelemetry tracing.
@@ -59,8 +60,8 @@ def init_tracing(
 
     try:
         from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
 
         resource = Resource.create({"service.name": service_name})
         provider = TracerProvider(resource=resource)
@@ -76,9 +77,7 @@ def init_tracing(
                 provider.add_span_processor(BatchSpanProcessor(exporter))
                 _LOG.info("OTLP exporter configured: %s", otlp_endpoint)
             except ImportError:
-                _LOG.warning(
-                    "opentelemetry-exporter-otlp not installed — tracing to console only"
-                )
+                _LOG.warning("opentelemetry-exporter-otlp not installed — tracing to console only")
         else:
             _LOG.info("No OTLP endpoint configured — traces available in-process only")
 
@@ -101,7 +100,7 @@ def get_tracer():
 
 
 @contextmanager
-def start_span(name: str, attributes: Optional[dict] = None):
+def start_span(name: str, attributes: dict | None = None):
     """Manual context-manager span for non-decorator usage.
 
     Yields a span object (or None when tracing is off).  The span is
@@ -138,8 +137,8 @@ def start_span(name: str, attributes: Optional[dict] = None):
 
 
 def traced(
-    operation_name: Optional[str] = None,
-    attributes: Optional[dict] = None,
+    operation_name: str | None = None,
+    attributes: dict | None = None,
 ) -> Callable:
     """Decorator that creates an OpenTelemetry span for an async function.
 

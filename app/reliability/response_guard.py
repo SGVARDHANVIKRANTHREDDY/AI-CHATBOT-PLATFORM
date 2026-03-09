@@ -14,19 +14,20 @@ Design rationale:
     Structural validation at the boundary catches these *before* downstream
     code acts on the response.
 """
+
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
 # ─── Prompt injection patterns (in LLM *output*) ─────────────────
-_INJECTION_PATTERNS: List[re.Pattern] = [
+_INJECTION_PATTERNS: list[re.Pattern] = [
     re.compile(r"(?i)ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|rules)"),
     re.compile(r"(?i)you\s+are\s+now\s+(a|an|the)\s+"),
     re.compile(r"(?i)system\s*:\s*"),
@@ -43,6 +44,7 @@ _TOOL_CALL_PATTERN = re.compile(r"<tool_call:\s*(\w+)\(.*?\)>")
 @dataclass
 class ValidationIssue:
     """Single validation problem found in a response."""
+
     category: str  # "hallucinated_tool", "invalid_json", "injection", "length"
     severity: str  # "warning", "error"
     message: str
@@ -52,9 +54,10 @@ class ValidationIssue:
 @dataclass
 class ValidationResult:
     """Outcome of response validation."""
+
     is_valid: bool = True
-    issues: List[ValidationIssue] = field(default_factory=list)
-    sanitized_response: Optional[str] = None
+    issues: list[ValidationIssue] = field(default_factory=list)
+    sanitized_response: str | None = None
     original_response: str = ""
 
     def add_issue(self, issue: ValidationIssue) -> None:
@@ -75,7 +78,7 @@ class ResponseValidator:
 
     def __init__(
         self,
-        known_tools: Optional[Set[str]] = None,
+        known_tools: set[str] | None = None,
         max_response_length: int = 16_000,
         strict_mode: bool = False,
     ) -> None:
@@ -87,8 +90,8 @@ class ResponseValidator:
         self,
         response: str,
         *,
-        expected_json_schema: Optional[Dict[str, Any]] = None,
-        context: Optional[Dict[str, Any]] = None,
+        expected_json_schema: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> ValidationResult:
         """Run all validation checks on a response.
 
@@ -161,9 +164,7 @@ class ResponseValidator:
             return truncated + "\n\n[Response truncated due to length limits]"
         return response
 
-    def _check_hallucinated_tools(
-        self, response: str, result: ValidationResult
-    ) -> str:
+    def _check_hallucinated_tools(self, response: str, result: ValidationResult) -> str:
         """Detect tool calls to non-existent tools."""
         matches = _TOOL_CALL_PATTERN.findall(response)
         sanitized = response
@@ -189,7 +190,7 @@ class ResponseValidator:
     def _check_json_schema(
         self,
         response: str,
-        schema: Dict[str, Any],
+        schema: dict[str, Any],
         result: ValidationResult,
     ) -> None:
         """Validate JSON output against an expected schema."""
@@ -255,9 +256,7 @@ class ResponseValidator:
                             )
                         )
 
-    def _check_prompt_injection(
-        self, response: str, result: ValidationResult
-    ) -> None:
+    def _check_prompt_injection(self, response: str, result: ValidationResult) -> None:
         """Detect prompt injection patterns in LLM output."""
         for pattern in _INJECTION_PATTERNS:
             match = pattern.search(response)

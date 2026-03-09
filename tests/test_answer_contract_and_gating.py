@@ -1,19 +1,19 @@
-﻿"""Unit tests for RAG gating logic and answer contract shape.
+"""Unit tests for RAG gating logic and answer contract shape.
 
 These tests exercise decide_refusal() (the pre-LLM gating gate) and the
 AnswerContract Pydantic model, both of which define the public contract
 for every response produced by the orchestrator.
 """
+
 from __future__ import annotations
 
 import pytest
+from app.security.refusal_guard import decide_refusal
+from app.shared.types import AnswerContract, Citation
 from pydantic import ValidationError
 
-from app.security.refusal_guard import decide_refusal, RefusalDecision
-from app.shared.types import AnswerContract, Citation
-
-
 # -- RAG gating -----------------------------------------------------------
+
 
 def test_rag_gating_refuses_low_score():
     """A RAG score below 0.35 must produce a refusal decision."""
@@ -51,6 +51,7 @@ def test_refusal_decision_is_frozen():
 
 
 # -- Answer contract shape ------------------------------------------------
+
 
 def test_answer_contract_shape_is_stable():
     """AnswerContract must expose exactly the required set of fields."""

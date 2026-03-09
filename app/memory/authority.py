@@ -15,13 +15,14 @@ Conflict resolution:
 
     Conflicts that cannot be auto-resolved are flagged for review.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from app.shared.utils import get_logger
 
@@ -32,6 +33,7 @@ KG_CONFIDENCE_THRESHOLD = 0.8
 
 class MemorySource(IntEnum):
     """Authority rank — higher value = higher authority."""
+
     VECTOR = 1
     KNOWLEDGE_GRAPH = 2
     CONVERSATION = 3
@@ -40,11 +42,12 @@ class MemorySource(IntEnum):
 @dataclass
 class MemoryFact:
     """A normalised fact extracted from any memory layer."""
-    key: str                  # e.g. "user_language", "user_name"
-    value: str                # e.g. "Python", "Alice"
+
+    key: str  # e.g. "user_language", "user_name"
+    value: str  # e.g. "Python", "Alice"
     source: MemorySource
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    confidence: float = 1.0   # 0.0–1.0
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    confidence: float = 1.0  # 0.0-1.0
 
     def __repr__(self) -> str:
         return (
@@ -56,9 +59,10 @@ class MemoryFact:
 @dataclass
 class MemoryConflict:
     """A detected disagreement between memory layers."""
+
     key: str
-    facts: List[MemoryFact]
-    winner: Optional[MemoryFact] = None
+    facts: list[MemoryFact]
+    winner: MemoryFact | None = None
     resolution_reason: str = ""
 
 
@@ -70,10 +74,22 @@ _KV_PATTERN = re.compile(
 )
 
 _PROFILE_KEYS = {
-    "name", "language", "preferred language", "programming language",
-    "location", "timezone", "role", "job", "company", "email",
-    "framework", "editor", "os", "operating system",
-    "favorite language", "favourite language",
+    "name",
+    "language",
+    "preferred language",
+    "programming language",
+    "location",
+    "timezone",
+    "role",
+    "job",
+    "company",
+    "email",
+    "framework",
+    "editor",
+    "os",
+    "operating system",
+    "favorite language",
+    "favourite language",
 }
 
 
@@ -83,17 +99,17 @@ def _normalise_key(raw: str) -> str:
 
 
 def extract_facts_from_conversation(
-    messages: List[Dict[str, str]],
-) -> List[MemoryFact]:
+    messages: list[dict[str, str]],
+) -> list[MemoryFact]:
     """Pull user-asserted facts from conversation history.
 
     Scans user messages for "my X is Y" / "X = Y" patterns and returns
     MemoryFact instances ordered by position (later = newer).
     """
-    facts: List[MemoryFact] = []
-    now = datetime.now(timezone.utc)
+    facts: list[MemoryFact] = []
+    now = datetime.now(UTC)
 
-    for idx, msg in enumerate(messages):
+    for _idx, msg in enumerate(messages):
         if msg.get("role") != "user":
             continue
         content = msg.get("content", "")
@@ -104,13 +120,15 @@ def extract_facts_from_conversation(
             if not any(pk in raw_key for pk in _PROFILE_KEYS):
                 continue
 
-            facts.append(MemoryFact(
-                key=_normalise_key(raw_key),
-                value=raw_val,
-                source=MemorySource.CONVERSATION,
-                timestamp=now,
-                confidence=1.0,
-            ))
+            facts.append(
+                MemoryFact(
+                    key=_normalise_key(raw_key),
+                    value=raw_val,
+                    source=MemorySource.CONVERSATION,
+                    timestamp=now,
+                    confidence=1.0,
+                )
+            )
             # Bump timestamp so later messages always win
             now = now  # same batch — position order used via list index
 
@@ -118,40 +136,45 @@ def extract_facts_from_conversation(
 
 
 def extract_facts_from_kg(
-    relationships: List[Dict[str, Any]],
-) -> List[MemoryFact]:
+    relationships: list[dict[str, Any]],
+) -> list[MemoryFact]:
     """Convert KG relationships to MemoryFact instances."""
-    facts: List[MemoryFact] = []
+    facts: list[MemoryFact] = []
     for rel in relationships:
         trust = float(rel.get("trust_score", 0.5))
-        facts.append(MemoryFact(
-            key=_normalise_key(f"{rel['subject']}_{rel['relation']}"),
-            value=rel["object"],
-            source=MemorySource.KNOWLEDGE_GRAPH,
-            confidence=trust,
-        ))
+        facts.append(
+            MemoryFact(
+                key=_normalise_key(f"{rel['subject']}_{rel['relation']}"),
+                value=rel["object"],
+                source=MemorySource.KNOWLEDGE_GRAPH,
+                confidence=trust,
+            )
+        )
     return facts
 
 
 def extract_facts_from_vector_context(
     context: str,
-) -> List[MemoryFact]:
+) -> list[MemoryFact]:
     """Best-effort extraction of facts from free-text vector context."""
-    facts: List[MemoryFact] = []
+    facts: list[MemoryFact] = []
     for match in _KV_PATTERN.finditer(context):
         raw_key = match.group(1).strip().lower()
         raw_val = match.group(2).strip().rstrip(".")
         if any(pk in raw_key for pk in _PROFILE_KEYS):
-            facts.append(MemoryFact(
-                key=_normalise_key(raw_key),
-                value=raw_val,
-                source=MemorySource.VECTOR,
-                confidence=0.7,
-            ))
+            facts.append(
+                MemoryFact(
+                    key=_normalise_key(raw_key),
+                    value=raw_val,
+                    source=MemorySource.VECTOR,
+                    confidence=0.7,
+                )
+            )
     return facts
 
 
 # ── Core resolver ─────────────────────────────────────────────────
+
 
 class MemoryAuthorityResolver:
     """Detects and resolves conflicts between memory layers.
@@ -171,28 +194,26 @@ class MemoryAuthorityResolver:
 
     # ── Public API ────────────────────────────────────────────────
 
-    def detect_conflicts(
-        self, facts: List[MemoryFact]
-    ) -> List[MemoryConflict]:
+    def detect_conflicts(self, facts: list[MemoryFact]) -> list[MemoryConflict]:
         """Find all keys where two or more sources disagree on the value."""
         grouped = self._group_by_key(facts)
-        conflicts: List[MemoryConflict] = []
+        conflicts: list[MemoryConflict] = []
 
         for key, key_facts in grouped.items():
             unique_values = {f.value.lower() for f in key_facts}
             if len(unique_values) > 1:
                 winner, reason = self._pick_winner(key_facts)
-                conflicts.append(MemoryConflict(
-                    key=key,
-                    facts=list(key_facts),
-                    winner=winner,
-                    resolution_reason=reason,
-                ))
+                conflicts.append(
+                    MemoryConflict(
+                        key=key,
+                        facts=list(key_facts),
+                        winner=winner,
+                        resolution_reason=reason,
+                    )
+                )
         return conflicts
 
-    def resolve_all(
-        self, facts: List[MemoryFact]
-    ) -> Dict[str, MemoryFact]:
+    def resolve_all(self, facts: list[MemoryFact]) -> dict[str, MemoryFact]:
         """Return the single authoritative fact per key.
 
         Applies the full authority hierarchy and filters out KG facts
@@ -200,15 +221,13 @@ class MemoryAuthorityResolver:
         """
         # Filter out low-confidence KG facts
         qualified = [
-            f for f in facts
-            if not (
-                f.source == MemorySource.KNOWLEDGE_GRAPH
-                and f.confidence < self.kg_confidence_threshold
-            )
+            f
+            for f in facts
+            if not (f.source == MemorySource.KNOWLEDGE_GRAPH and f.confidence < self.kg_confidence_threshold)
         ]
 
         grouped = self._group_by_key(qualified)
-        resolved: Dict[str, MemoryFact] = {}
+        resolved: dict[str, MemoryFact] = {}
 
         for key, key_facts in grouped.items():
             winner, _ = self._pick_winner(key_facts)
@@ -217,9 +236,7 @@ class MemoryAuthorityResolver:
 
         return resolved
 
-    def reconcile(
-        self, facts: List[MemoryFact]
-    ) -> Tuple[Dict[str, MemoryFact], List[MemoryConflict]]:
+    def reconcile(self, facts: list[MemoryFact]) -> tuple[dict[str, MemoryFact], list[MemoryConflict]]:
         """One-shot: resolve facts and return both the resolved map and
         any conflicts that were detected (with their resolutions).
 
@@ -234,17 +251,17 @@ class MemoryAuthorityResolver:
 
     @staticmethod
     def _group_by_key(
-        facts: List[MemoryFact],
-    ) -> Dict[str, List[MemoryFact]]:
-        groups: Dict[str, List[MemoryFact]] = {}
+        facts: list[MemoryFact],
+    ) -> dict[str, list[MemoryFact]]:
+        groups: dict[str, list[MemoryFact]] = {}
         for f in facts:
             groups.setdefault(f.key, []).append(f)
         return groups
 
     @staticmethod
     def _pick_winner(
-        facts: List[MemoryFact],
-    ) -> Tuple[Optional[MemoryFact], str]:
+        facts: list[MemoryFact],
+    ) -> tuple[MemoryFact | None, str]:
         """Choose the authoritative fact from a list sharing the same key.
 
         Resolution order:

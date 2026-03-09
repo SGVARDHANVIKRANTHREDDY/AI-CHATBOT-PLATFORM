@@ -11,15 +11,14 @@ Features:
 Requires:
     pip install qdrant-client[fastembed]
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
-import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
-
 from app.shared.utils import get_logger
 from app.vector_memory.base import SearchResult, VectorRecord, VectorStore
 
@@ -42,7 +41,10 @@ async def _retry_async(coro_factory, *, max_retries=_MAX_RETRIES):
                 raise
             _LOG.warning(
                 "Qdrant retry %d/%d after %s: %s",
-                attempt, max_retries, type(exc).__name__, exc,
+                attempt,
+                max_retries,
+                type(exc).__name__,
+                exc,
             )
             jitter = delay * 0.5 * (0.5 + asyncio.get_event_loop().time() % 1)
             await asyncio.sleep(min(delay + jitter, _MAX_DELAY))
@@ -65,7 +67,7 @@ class QdrantVectorStore(VectorStore):
         self,
         collection_name: str = "memories",
         url: str = "http://localhost:6333",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         embedding_dim: int = 384,
         prefer_grpc: bool = True,
         batch_size: int = 100,
@@ -132,7 +134,7 @@ class QdrantVectorStore(VectorStore):
         id: str,
         embedding: np.ndarray,
         text: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         from qdrant_client.models import PointStruct
 
@@ -155,18 +157,15 @@ class QdrantVectorStore(VectorStore):
         self,
         query_embedding: np.ndarray,
         top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[SearchResult]:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        filters: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         client = await self._get_client()
 
         qdrant_filter = None
         if filters:
-            conditions = [
-                FieldCondition(key=k, match=MatchValue(value=v))
-                for k, v in filters.items()
-            ]
+            conditions = [FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()]
             qdrant_filter = Filter(must=conditions)
 
         start = time.perf_counter()
@@ -180,7 +179,7 @@ class QdrantVectorStore(VectorStore):
         )
         _emit_search_metric(time.perf_counter() - start)
 
-        results: List[SearchResult] = []
+        results: list[SearchResult] = []
         for hit in hits:
             payload = hit.payload or {}
             results.append(
@@ -193,7 +192,7 @@ class QdrantVectorStore(VectorStore):
             )
         return results
 
-    async def delete(self, ids: List[str]) -> int:
+    async def delete(self, ids: list[str]) -> int:
         from qdrant_client.models import PointIdsList
 
         client = await self._get_client()
@@ -205,7 +204,7 @@ class QdrantVectorStore(VectorStore):
         )
         return len(ids)
 
-    async def batch_insert(self, records: List[VectorRecord]) -> int:
+    async def batch_insert(self, records: list[VectorRecord]) -> int:
         from qdrant_client.models import PointStruct
 
         client = await self._get_client()
@@ -234,33 +233,35 @@ class QdrantVectorStore(VectorStore):
 
     async def count(self) -> int:
         client = await self._get_client()
-        info = await _retry_async(
-            lambda: client.get_collection(self.collection_name)
-        )
+        info = await _retry_async(lambda: client.get_collection(self.collection_name))
         return info.points_count or 0
 
 
-# ── Prometheus helpers (no-op–safe if prometheus_client absent) ───
+# -- Prometheus helpers (no-op-safe if prometheus_client absent) ---
+
 
 def _emit_search_metric(duration: float) -> None:
     try:
         from app.shared.monitoring import VECTOR_QUERY_LATENCY
+
         VECTOR_QUERY_LATENCY.observe(duration)
-    except Exception:
+    except Exception:  # noqa: S110
         pass
 
 
 def _emit_insert_metric() -> None:
     try:
         from app.shared.monitoring import VECTOR_INDEX_SIZE
+
         VECTOR_INDEX_SIZE.inc()
-    except Exception:
+    except Exception:  # noqa: S110
         pass
 
 
 def _emit_batch_metric(count: int) -> None:
     try:
         from app.shared.monitoring import VECTOR_INDEX_SIZE
+
         VECTOR_INDEX_SIZE.inc(count)
-    except Exception:
+    except Exception:  # noqa: S110
         pass

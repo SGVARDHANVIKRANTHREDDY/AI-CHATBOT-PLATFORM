@@ -10,6 +10,7 @@ Provides the building blocks for simulating failures across the AI platform:
 All faults are reversible — they patch targets during the test and
 restore originals on cleanup, even if the test raises.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,34 +18,36 @@ import enum
 import functools
 import random
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Type
-from unittest.mock import AsyncMock, MagicMock, patch
-
+from typing import Any
 
 # ── Fault categories ──────────────────────────────────────────────
 
+
 class FaultType(enum.Enum):
-    OUTAGE = "outage"                   # Component completely unavailable
-    LATENCY = "latency"                 # Delayed responses
-    INTERMITTENT = "intermittent"       # Flaky — fails N% of the time
-    CORRUPTION = "corruption"           # Returns bad data
-    TIMEOUT = "timeout"                 # Hangs until timeout fires
-    CRASH = "crash"                     # Raises unexpected exception
+    OUTAGE = "outage"  # Component completely unavailable
+    LATENCY = "latency"  # Delayed responses
+    INTERMITTENT = "intermittent"  # Flaky — fails N% of the time
+    CORRUPTION = "corruption"  # Returns bad data
+    TIMEOUT = "timeout"  # Hangs until timeout fires
+    CRASH = "crash"  # Raises unexpected exception
     RESOURCE_EXHAUSTION = "resource_exhaustion"  # OOM / disk full
 
 
 class FaultSeverity(enum.Enum):
-    PARTIAL = "partial"     # Some operations affected
-    COMPLETE = "complete"   # All operations affected
+    PARTIAL = "partial"  # Some operations affected
+    COMPLETE = "complete"  # All operations affected
 
 
 # ── Outcome tracking ─────────────────────────────────────────────
 
+
 @dataclass
 class ChaosResult:
     """Captures the outcome of a chaos experiment."""
+
     fault_type: FaultType
     target_component: str
     injected_at: float = 0.0
@@ -52,10 +55,10 @@ class ChaosResult:
     recovered: bool = False
     fallback_used: bool = False
     retries_attempted: int = 0
-    error_type: Optional[str] = None
-    error_message: Optional[str] = None
-    degraded_response: Optional[str] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
+    error_type: str | None = None
+    error_message: str | None = None
+    degraded_response: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @property
     def recovery_time_ms(self) -> float:
@@ -65,6 +68,7 @@ class ChaosResult:
 
 
 # ── Base fault injector ──────────────────────────────────────────
+
 
 class FaultInjector:
     """Base class for all fault injectors.
@@ -84,7 +88,7 @@ class FaultInjector:
         self.fault_type = fault_type
         self.severity = severity
         self._active = False
-        self._patches: List[Any] = []
+        self._patches: list[Any] = []
 
     async def apply(self) -> None:
         """Activate the fault injection."""
@@ -123,49 +127,60 @@ class FaultInjector:
 
 # ── Failure-producing helpers ─────────────────────────────────────
 
+
 def make_failing_coro(
-    error_cls: Type[Exception] = ConnectionError,
+    error_cls: type[Exception] = ConnectionError,
     message: str = "Chaos: simulated failure",
 ):
     """Return an async function that always raises."""
+
     async def _fail(*args, **kwargs):
         raise error_cls(message)
+
     return _fail
 
 
 def make_timeout_coro(delay: float = 120.0):
     """Return an async function that sleeps forever (until cancelled)."""
+
     async def _hang(*args, **kwargs):
         await asyncio.sleep(delay)
         return "should not reach"
+
     return _hang
 
 
 def make_intermittent_coro(
     original_fn: Callable,
     failure_rate: float = 0.5,
-    error_cls: Type[Exception] = ConnectionError,
+    error_cls: type[Exception] = ConnectionError,
 ):
     """Wraps *original_fn*; fails *failure_rate* fraction of calls."""
+
     @functools.wraps(original_fn)
     async def _maybe_fail(*args, **kwargs):
-        if random.random() < failure_rate:
-            raise error_cls(f"Chaos: intermittent failure ({failure_rate*100:.0f}%)")
+        if random.random() < failure_rate:  # noqa: S311
+            raise error_cls(f"Chaos: intermittent failure ({failure_rate * 100:.0f}%)")
         return await original_fn(*args, **kwargs)
+
     return _maybe_fail
 
 
 def make_latency_coro(original_fn: Callable, added_seconds: float = 5.0):
     """Wraps *original_fn* adding artificial latency."""
+
     @functools.wraps(original_fn)
     async def _slow(*args, **kwargs):
         await asyncio.sleep(added_seconds)
         return await original_fn(*args, **kwargs)
+
     return _slow
 
 
 def make_corrupt_coro(corruption: str = "{{CORRUPTED_RESPONSE}}"):
     """Return an async function that returns garbage data."""
+
     async def _corrupt(*args, **kwargs):
         return corruption
+
     return _corrupt

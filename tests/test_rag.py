@@ -1,17 +1,17 @@
-﻿"""Tests for RAGRetriever: chunking logic and end-to-end index + search.
+"""Tests for RAGRetriever: chunking logic and end-to-end index + search.
 
 A toy 3-dimensional embedder is injected via monkeypatch so the tests
 never download sentence-transformer weights.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-from app.rag.retriever import RAGRetriever
 from app.config.settings import settings
+from app.rag.retriever import RAGRetriever
 
 
 def _toy_encode(texts: list[str]) -> np.ndarray:
@@ -47,6 +47,7 @@ def rag_in_tmpdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RAGRetriev
 
 # -- Chunking -------------------------------------------------------------
 
+
 def test_chunking_sentence_overlap(rag_in_tmpdir: RAGRetriever):
     """Overlap should cause sentence boundaries to be reused across chunks."""
     text = "A one. B two. C three. D four."
@@ -65,6 +66,7 @@ def test_chunking_single_sentence(rag_in_tmpdir: RAGRetriever):
 
 
 # -- Index build + search -------------------------------------------------
+
 
 def test_index_build_and_search_txt_doc(rag_in_tmpdir: RAGRetriever):
     doc_path = rag_in_tmpdir.raw_docs_dir / "doc1.txt"

@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 import re
-from typing import List, Optional
+
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
@@ -16,13 +17,14 @@ _INJECTION_PATTERNS = [
     r"(?i)\[user\]",
     r"(?i)\bDAN\b",
     r"(?i)\bjailbreak\b",
-    r"(?i)\bdo anything now\b"
+    r"(?i)\bdo anything now\b",
 ]
+
 
 class PromptGuard:
     """Security layer to detect and prevent prompt injection and malicious inputs."""
-    
-    def __init__(self, patterns: Optional[List[str]] = None):
+
+    def __init__(self, patterns: list[str] | None = None):
         self.regexes = [re.compile(p) for p in (patterns or _INJECTION_PATTERNS)]
 
     def scan(self, text: str) -> bool:
@@ -31,8 +33,9 @@ class PromptGuard:
         Returns True if text is flagged as suspicious.
         """
         t = (text or "").strip()
-        if not t: return False
-        
+        if not t:
+            return False
+
         for rex in self.regexes:
             if rex.search(t):
                 _LOG.warning(f"Suspect input detected: pattern match '{rex.pattern}'")

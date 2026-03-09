@@ -4,21 +4,22 @@ E2E Test: Swarm Execution and Load Protection
 Tests parallel agent execution with throttling,
 load guard admission control, and graceful degradation.
 """
+
 from __future__ import annotations
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock
+import contextlib
 
+import pytest
 from app.reliability.load_guard import (
-    RequestQueueLimiter,
     AgentExecutionLimiter,
+    LoadGuardRejectionError,
+    RequestQueueLimiter,
     SwarmThrottle,
-    LoadGuardRejection,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def request_limiter():
@@ -32,12 +33,14 @@ def agent_limiter():
 
 # ── Request Queue Limiter Tests ──────────────────────────────────
 
+
 class TestRequestQueueLimiter:
     """Tests for the RequestQueueLimiter admission control."""
 
     @pytest.mark.asyncio
     async def test_allows_within_limit(self, request_limiter):
         """Requests within the limit pass through."""
+
         async def work():
             await asyncio.sleep(0.01)
             return "done"
@@ -71,14 +74,12 @@ class TestRequestQueueLimiter:
         await asyncio.sleep(0.05)  # Let it acquire
 
         # Second request should be rejected
-        with pytest.raises(LoadGuardRejection):
+        with pytest.raises(LoadGuardRejectionError):
             await limiter.execute(slow_work)
 
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, LoadGuardRejectionError):
             await task
-        except (asyncio.CancelledError, LoadGuardRejection):
-            pass
 
     @pytest.mark.asyncio
     async def test_utilization_metric(self, request_limiter):
@@ -101,12 +102,14 @@ class TestRequestQueueLimiter:
 
 # ── Agent Execution Limiter Tests ────────────────────────────────
 
+
 class TestAgentExecutionLimiter:
     """Tests for the AgentExecutionLimiter."""
 
     @pytest.mark.asyncio
     async def test_allows_within_limit(self, agent_limiter):
         """Agent executions within the limit pass through."""
+
         async def agent_work():
             return "agent_done"
 
@@ -123,10 +126,7 @@ class TestAgentExecutionLimiter:
             results.append(idx)
             return idx
 
-        tasks = [
-            asyncio.create_task(agent_limiter.execute(agent_work, i))
-            for i in range(3)
-        ]
+        tasks = [asyncio.create_task(agent_limiter.execute(agent_work, i)) for i in range(3)]
         await asyncio.gather(*tasks)
         assert len(results) == 3
 
@@ -141,17 +141,16 @@ class TestAgentExecutionLimiter:
         task = asyncio.create_task(limiter.execute(slow_agent))
         await asyncio.sleep(0.05)
 
-        with pytest.raises(LoadGuardRejection):
+        with pytest.raises(LoadGuardRejectionError):
             await limiter.execute(slow_agent)
 
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, LoadGuardRejectionError):
             await task
-        except (asyncio.CancelledError, LoadGuardRejection):
-            pass
 
 
 # ── Swarm Throttle Tests ─────────────────────────────────────────
+
 
 class TestSwarmThrottle:
     """Tests for dynamic swarm throttling."""

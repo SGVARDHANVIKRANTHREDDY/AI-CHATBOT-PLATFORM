@@ -14,6 +14,7 @@ Architecture:
              → Communication via plugin_protocol.py (length-prefixed JSON)
              → Subprocess is killed if it exceeds the timeout
 """
+
 from __future__ import annotations
 
 import importlib
@@ -24,9 +25,10 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from app.plugins.plugin_protocol import PluginRequest, PluginResponse
 from app.shared.utils import get_logger
@@ -40,10 +42,11 @@ _RUNTIME_MODULE = "app.plugins.plugin_runtime"
 @dataclass
 class PluginRunResult:
     """Outcome of a subprocess plugin invocation."""
+
     success: bool = False
     result: Any = None
-    error: Optional[str] = None
-    error_type: Optional[str] = None
+    error: str | None = None
+    error_type: str | None = None
     execution_time_ms: float = 0.0
     stdout_log: str = ""
     stderr_log: str = ""
@@ -72,21 +75,21 @@ class PluginRunner:
         self,
         timeout_seconds: float = 30.0,
         memory_limit_mb: float = 256.0,
-        python_executable: Optional[str] = None,
-        extra_python_paths: Optional[List[str]] = None,
+        python_executable: str | None = None,
+        extra_python_paths: list[str] | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.memory_limit_mb = memory_limit_mb
         self.python_executable = python_executable or sys.executable
         self.extra_python_paths = extra_python_paths or []
 
-    def _build_env(self) -> Dict[str, str]:
+    def _build_env(self) -> dict[str, str]:
         """Construct a minimal environment for the child process.
 
         Deliberately excludes all application secrets, API keys,
         database URLs, and other sensitive variables.
         """
-        env: Dict[str, str] = {}
+        env: dict[str, str] = {}
 
         # Minimum for the Python runtime on Windows / Linux
         for key in ("PATH", "SYSTEMROOT", "TEMP", "TMP"):
@@ -96,7 +99,7 @@ class PluginRunner:
 
         # Ensure the project root is on PYTHONPATH so plugin imports work
         project_root = str(Path(__file__).resolve().parents[2])
-        paths = [project_root] + self.extra_python_paths
+        paths = [project_root, *self.extra_python_paths]
         env["PYTHONPATH"] = os.pathsep.join(paths)
 
         # Deterministic hashing (defence against hash-flooding DoS)
@@ -108,7 +111,7 @@ class PluginRunner:
         self,
         plugin_module: str,
         function_name: str,
-        kwargs: Optional[Dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ) -> PluginRunResult:
         """Execute a plugin function in a subprocess.
 
@@ -126,7 +129,7 @@ class PluginRunner:
         )
 
         payload = json.dumps(request.to_dict(), default=str).encode("utf-8")
-        message = f"{len(payload)}\n".encode("utf-8") + payload
+        message = f"{len(payload)}\n".encode() + payload
 
         start = time.perf_counter()
 
@@ -143,9 +146,7 @@ class PluginRunner:
             )
 
             try:
-                stdout_bytes, stderr_bytes = proc.communicate(
-                    input=message, timeout=self.timeout_seconds
-                )
+                stdout_bytes, stderr_bytes = proc.communicate(input=message, timeout=self.timeout_seconds)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 # After kill, drain remaining output safely
@@ -155,8 +156,7 @@ class PluginRunner:
                     stdout_bytes, stderr_bytes = b"", b""
                 elapsed = (time.perf_counter() - start) * 1000
                 _LOG.error(
-                    "Plugin subprocess killed after %.1fs timeout "
-                    "(module=%s, func=%s)",
+                    "Plugin subprocess killed after %.1fs timeout (module=%s, func=%s)",
                     self.timeout_seconds,
                     plugin_module,
                     function_name,
@@ -221,7 +221,7 @@ def _safe_decode(data: bytes, max_len: int = 4096) -> str:
         return ""
 
 
-def _parse_response(stdout_bytes: bytes) -> Optional[dict]:
+def _parse_response(stdout_bytes: bytes) -> dict | None:
     """Parse a length-prefixed JSON response from raw stdout bytes."""
     try:
         newline_idx = stdout_bytes.index(b"\n")
@@ -249,11 +249,11 @@ class PluginRegistry:
     def __init__(
         self,
         plugin_package: str = "app.plugins",
-        runner: Optional[PluginRunner] = None,
+        runner: PluginRunner | None = None,
     ) -> None:
         self.plugin_package = plugin_package
         self.runner = runner or _RUNNER
-        self.discovered_tools: Dict[str, Callable] = {}
+        self.discovered_tools: dict[str, Callable] = {}
 
     def discover(self) -> None:
         """Scan the plugin package for modules and register tools.
@@ -285,9 +285,7 @@ class PluginRegistry:
                     tools = module.register_tools()
                     if isinstance(tools, dict):
                         isolated = {
-                            tool_name: self._wrap_tool_isolated(
-                                tool_name, module_name, tool_name
-                            )
+                            tool_name: self._wrap_tool_isolated(tool_name, module_name, tool_name)
                             for tool_name in tools
                         }
                         self.discovered_tools.update(isolated)
@@ -297,15 +295,11 @@ class PluginRegistry:
                             len(isolated),
                         )
                     else:
-                        _LOG.warning(
-                            "Plugin %s did not return a valid tool dict.", name
-                        )
+                        _LOG.warning("Plugin %s did not return a valid tool dict.", name)
         except Exception as e:
             _LOG.error("Plugin discovery failed: %s", e)
 
-    def _wrap_tool_isolated(
-        self, tool_name: str, module_name: str, function_name: str
-    ) -> Callable:
+    def _wrap_tool_isolated(self, tool_name: str, module_name: str, function_name: str) -> Callable:
         """Return an async callable that executes the tool in a subprocess."""
         runner = self.runner
 
@@ -314,17 +308,13 @@ class PluginRegistry:
             if result.success:
                 return str(result.result)
             else:
-                _LOG.error(
-                    "Isolated tool '%s' failed: %s", tool_name, result.error
-                )
+                _LOG.error("Isolated tool '%s' failed: %s", tool_name, result.error)
                 return f"Error: {result.error}"
 
         _isolated_tool.__name__ = f"isolated_{tool_name}"
-        _isolated_tool.__doc__ = (
-            f"Subprocess-isolated wrapper for plugin tool '{tool_name}'"
-        )
+        _isolated_tool.__doc__ = f"Subprocess-isolated wrapper for plugin tool '{tool_name}'"
         return _isolated_tool
 
-    def get_tools(self) -> Dict[str, Callable]:
+    def get_tools(self) -> dict[str, Callable]:
         """Return all discovered tools (subprocess-isolated)."""
         return self.discovered_tools

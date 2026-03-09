@@ -10,14 +10,16 @@ Registered as a Celery task so it can be called with::
     from workers.indexing_worker import index_vectors
     index_vectors.delay(records=[...], memory_type="episodic")
 """
+
 from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from app.shared.utils import get_logger
 
 from workers.celery_app import celery_app
-from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
@@ -31,9 +33,9 @@ _LOG = get_logger(__name__)
 )
 def index_vectors(
     self,
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     memory_type: str = "episodic",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Celery task: batch-insert vector records into the configured store.
 
     Each record dict should contain:
@@ -45,11 +47,9 @@ def index_vectors(
     Returns:
         Summary dict with insert count.
     """
+    from app.vector_memory.base import VectorRecord
     from app.vector_memory.embeddings import embedding_service
     from app.vector_memory.vector_store import _create_backend
-    from app.vector_memory.base import VectorRecord
-
-    import numpy as np
 
     store = _create_backend(memory_type)
 
@@ -76,14 +76,12 @@ def index_vectors(
             )
 
         count = loop.run_until_complete(store.batch_insert(vector_records))
-        _LOG.info(
-            "Indexed %d vectors into '%s'", count, memory_type
-        )
+        _LOG.info("Indexed %d vectors into '%s'", count, memory_type)
         return {"status": "success", "indexed": count, "memory_type": memory_type}
 
     except Exception as e:
         _LOG.error("Background indexing failed for '%s': %s", memory_type, e)
-        raise self.retry(countdown=30, exc=e)
+        raise self.retry(countdown=30, exc=e) from e
     finally:
         loop.run_until_complete(store.close())
         loop.close()
@@ -98,21 +96,19 @@ def index_vectors(
 )
 def run_migration_task(
     self,
-    memory_types: Optional[List[str]] = None,
+    memory_types: list[str] | None = None,
     qdrant_url: str = "http://localhost:6333",
     collection_name: str = "memories",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Celery task: migrate FAISS indices to Qdrant."""
     from app.vector_memory.migration import run_migration
 
     loop = asyncio.new_event_loop()
     try:
-        result = loop.run_until_complete(
-            run_migration(memory_types, qdrant_url, collection_name)
-        )
+        result = loop.run_until_complete(run_migration(memory_types, qdrant_url, collection_name))
         return result
     except Exception as e:
         _LOG.error("Migration task failed: %s", e)
-        raise self.retry(countdown=120, exc=e)
+        raise self.retry(countdown=120, exc=e) from e
     finally:
         loop.close()

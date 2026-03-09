@@ -8,20 +8,18 @@ Simulates:
     4. Graceful cancellation with partial result return
     5. Normal execution within budget
 """
+
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
-
 from app.orchestrator.watchdog import (
-    AgentBudgetExceeded,
+    AgentBudgetExceededError,
     AgentExecutionContext,
     AgentWatchdog,
     TerminationReason,
 )
-
 
 # ═════════════════════════════════════════════════════════════════
 # AgentExecutionContext — unit tests
@@ -29,7 +27,6 @@ from app.orchestrator.watchdog import (
 
 
 class TestAgentExecutionContext:
-
     def test_fresh_context_within_budget(self):
         ctx = AgentExecutionContext(
             execution_id="t1",
@@ -40,31 +37,28 @@ class TestAgentExecutionContext:
         ctx.check()  # should not raise
 
     def test_iteration_limit_raises(self):
-        ctx = AgentExecutionContext(
-            execution_id="t2", max_iterations=3
-        )
+        ctx = AgentExecutionContext(execution_id="t2", max_iterations=3)
         for _ in range(3):
             ctx.record_iteration()
-        with pytest.raises(AgentBudgetExceeded) as exc_info:
+        with pytest.raises(AgentBudgetExceededError) as exc_info:
             ctx.check()
         assert exc_info.value.reason == TerminationReason.ITERATION_LIMIT
         assert ctx.termination_reason == TerminationReason.ITERATION_LIMIT
 
     def test_tool_call_limit_raises(self):
-        ctx = AgentExecutionContext(
-            execution_id="t3", max_tool_calls=2
-        )
+        ctx = AgentExecutionContext(execution_id="t3", max_tool_calls=2)
         ctx.record_tool_call("tool_a")
         ctx.record_tool_call("tool_b")
-        with pytest.raises(AgentBudgetExceeded) as exc_info:
+        with pytest.raises(AgentBudgetExceededError) as exc_info:
             ctx.check()
         assert exc_info.value.reason == TerminationReason.TOOL_CALL_LIMIT
 
     def test_runtime_limit_raises(self):
         ctx = AgentExecutionContext(
-            execution_id="t4", max_runtime_seconds=0.0  # already expired
+            execution_id="t4",
+            max_runtime_seconds=0.0,  # already expired
         )
-        with pytest.raises(AgentBudgetExceeded) as exc_info:
+        with pytest.raises(AgentBudgetExceededError) as exc_info:
             ctx.check()
         assert exc_info.value.reason == TerminationReason.RUNTIME_LIMIT
 
@@ -72,7 +66,7 @@ class TestAgentExecutionContext:
         ctx = AgentExecutionContext(execution_id="t5")
         ctx.cancel()
         assert ctx.is_cancelled
-        with pytest.raises(AgentBudgetExceeded) as exc_info:
+        with pytest.raises(AgentBudgetExceededError) as exc_info:
             ctx.check()
         assert exc_info.value.reason == TerminationReason.CANCELLED
 
@@ -94,9 +88,7 @@ class TestAgentExecutionContext:
         assert "elapsed_seconds" in s
 
     def test_remaining_seconds(self):
-        ctx = AgentExecutionContext(
-            execution_id="t8", max_runtime_seconds=100
-        )
+        ctx = AgentExecutionContext(execution_id="t8", max_runtime_seconds=100)
         assert ctx.remaining_seconds > 90
 
 
@@ -106,7 +98,6 @@ class TestAgentExecutionContext:
 
 
 class TestAgentWatchdog:
-
     @pytest.mark.asyncio
     async def test_infinite_agent_loop_terminated(self):
         """Simulate an agent that loops forever — watchdog must kill it."""

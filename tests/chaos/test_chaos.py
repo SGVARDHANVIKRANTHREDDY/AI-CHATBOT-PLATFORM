@@ -13,30 +13,23 @@ For each domain, verifies:
     • Graceful degradation returns safe responses (no crashes)
     • Recovery works once the fault is removed
 """
+
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+import contextlib
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-
-from tests.chaos.framework import (
-    ChaosResult,
-    FaultInjector,
-    FaultSeverity,
-    FaultType,
-    make_corrupt_coro,
-    make_failing_coro,
-    make_intermittent_coro,
-    make_timeout_coro,
-)
 from tests.chaos.fault_injectors import (
     LLMProviderFault,
     PluginFault,
     VectorDBFault,
     WorkerFault,
+)
+from tests.chaos.framework import (
+    FaultType,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -49,7 +42,7 @@ class StubLLMProvider:
         self._response = response
         self.call_count = 0
 
-    async def ask(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
+    async def ask(self, prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
         self.call_count += 1
         return self._response
 
@@ -66,24 +59,24 @@ class StubVectorStore:
     """Minimal vector store for chaos testing."""
 
     def __init__(self):
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
         self.call_count = 0
 
     async def initialize(self):
         pass
 
-    async def add_embedding(self, id: str, embedding: Any, text: str = "", metadata: Optional[Dict] = None) -> None:
+    async def add_embedding(self, id: str, embedding: Any, text: str = "", metadata: dict | None = None) -> None:
         self.call_count += 1
         self._data[id] = {"text": text, "embedding": embedding, "metadata": metadata or {}}
 
-    async def search(self, query_embedding: Any, top_k: int = 5, filters: Optional[Dict] = None) -> List[Dict]:
+    async def search(self, query_embedding: Any, top_k: int = 5, filters: dict | None = None) -> list[dict]:
         self.call_count += 1
         results = []
         for rid, rec in list(self._data.items())[:top_k]:
             results.append({"id": rid, "text": rec["text"], "score": 0.95, "metadata": rec["metadata"]})
         return results
 
-    async def delete(self, ids: List[str]) -> int:
+    async def delete(self, ids: list[str]) -> int:
         self.call_count += 1
         removed = 0
         for rid in ids:
@@ -92,7 +85,7 @@ class StubVectorStore:
                 removed += 1
         return removed
 
-    async def batch_insert(self, records: List[Any]) -> int:
+    async def batch_insert(self, records: list[Any]) -> int:
         self.call_count += 1
         return len(records)
 
@@ -146,7 +139,7 @@ class TestLLMProviderChaos:
         fault = LLMProviderFault(provider, FaultType.OUTAGE)
 
         async with fault.inject() as result:
-            with pytest.raises(ConnectionError, match="Chaos.*unavailable"):
+            with pytest.raises(ConnectionError, match=r"Chaos.*unavailable"):
                 await provider.ask("test")
             result.error_type = "ConnectionError"
 
@@ -195,7 +188,9 @@ class TestLLMProviderChaos:
         """Intermittent faults fail only a fraction of calls."""
         provider = StubLLMProvider(response="ok")
         fault = LLMProviderFault(
-            provider, FaultType.INTERMITTENT, failure_rate=0.5,
+            provider,
+            FaultType.INTERMITTENT,
+            failure_rate=0.5,
         )
 
         successes, failures = 0, 0
@@ -229,7 +224,7 @@ class TestLLMProviderChaos:
     @pytest.mark.asyncio
     async def test_circuit_breaker_trips_on_repeated_llm_failures(self):
         """Circuit breaker transitions CLOSED → OPEN after threshold failures."""
-        from app.reliability.circuit_breaker import CircuitBreaker, CircuitState, CircuitOpenError
+        from app.reliability.circuit_breaker import CircuitBreaker, CircuitState
 
         provider = StubLLMProvider()
         fallback_called = False
@@ -251,10 +246,8 @@ class TestLLMProviderChaos:
         async with fault.inject():
             # Trip the breaker
             for _ in range(3):
-                try:
+                with contextlib.suppress(ConnectionError):
                     await cb.call(provider.ask, "test")
-                except ConnectionError:
-                    pass
 
             assert cb.state == CircuitState.OPEN
 
@@ -280,10 +273,8 @@ class TestLLMProviderChaos:
         # Trip the breaker
         async with fault.inject():
             for _ in range(2):
-                try:
+                with contextlib.suppress(ConnectionError):
                     await cb.call(provider.ask, "test")
-                except ConnectionError:
-                    pass
 
         assert cb.state == CircuitState.OPEN
 
@@ -301,7 +292,7 @@ class TestLLMProviderChaos:
     @pytest.mark.asyncio
     async def test_retry_policy_retries_on_llm_outage(self):
         """RetryPolicy attempts configured retries before exhausting."""
-        from app.reliability.retry_policy import RetryPolicy, RetryExhaustedError
+        from app.reliability.retry_policy import RetryExhaustedError, RetryPolicy
 
         provider = StubLLMProvider()
         retry = RetryPolicy(
@@ -377,17 +368,16 @@ class TestLLMProviderChaos:
         fault_primary = LLMProviderFault(primary, FaultType.OUTAGE)
         fault_secondary = LLMProviderFault(secondary, FaultType.OUTAGE)
 
-        async with fault_primary.inject():
-            async with fault_secondary.inject():
-                with pytest.raises(RuntimeError, match="All LLM providers"):
-                    await fb.ask("test")
+        async with fault_primary.inject(), fault_secondary.inject():
+            with pytest.raises(RuntimeError, match="All LLM providers"):
+                await fb.ask("test")
 
     # ── Graceful degradation ──────────────────────────────────────
 
     @pytest.mark.asyncio
     async def test_llm_outage_graceful_degradation_via_circuit(self):
         """System returns degraded response rather than crashing."""
-        from app.reliability.circuit_breaker import CircuitBreaker, CircuitState
+        from app.reliability.circuit_breaker import CircuitBreaker
 
         provider = StubLLMProvider()
 
@@ -404,10 +394,8 @@ class TestLLMProviderChaos:
         fault = LLMProviderFault(provider, FaultType.OUTAGE)
         async with fault.inject():
             for _ in range(2):
-                try:
+                with contextlib.suppress(ConnectionError):
                     await cb.call(provider.ask, "test")
-                except ConnectionError:
-                    pass
 
             # Degraded path — no crash
             result = await cb.call(provider.ask, "test")
@@ -429,7 +417,7 @@ class TestVectorDBChaos:
         fault = VectorDBFault(store, FaultType.OUTAGE)
 
         async with fault.inject():
-            with pytest.raises(ConnectionError, match="Chaos.*search"):
+            with pytest.raises(ConnectionError, match=r"Chaos.*search"):
                 await store.search(query_embedding=[0.1, 0.2])
 
     @pytest.mark.asyncio
@@ -439,7 +427,7 @@ class TestVectorDBChaos:
         fault = VectorDBFault(store, FaultType.OUTAGE)
 
         async with fault.inject():
-            with pytest.raises(ConnectionError, match="Chaos.*add_embedding"):
+            with pytest.raises(ConnectionError, match=r"Chaos.*add_embedding"):
                 await store.add_embedding(id="x", embedding=[0.1], text="test")
 
     @pytest.mark.asyncio
@@ -511,10 +499,8 @@ class TestVectorDBChaos:
         fault = VectorDBFault(store, FaultType.OUTAGE)
         async with fault.inject():
             for _ in range(3):
-                try:
+                with contextlib.suppress(ConnectionError):
                     await cb.call(store.search, query_embedding=[0.1])
-                except ConnectionError:
-                    pass
 
             assert cb.state == CircuitState.OPEN
 
@@ -543,7 +529,7 @@ class TestVectorDBChaos:
             max_delay=0.05,
         )
 
-        results = await retry.execute(store.search, query_embedding=[0.1])
+        await retry.execute(store.search, query_embedding=[0.1])
         assert call_count == 2
 
     # ── Graceful degradation — empty results rather than crash ────
@@ -568,10 +554,8 @@ class TestVectorDBChaos:
         fault = VectorDBFault(store, FaultType.OUTAGE)
         async with fault.inject():
             for _ in range(2):
-                try:
+                with contextlib.suppress(ConnectionError):
                     await cb.call(store.search, query_embedding=[0.1])
-                except ConnectionError:
-                    pass
 
             result = await cb.call(store.search, query_embedding=[0.1])
             assert result == []
@@ -592,7 +576,7 @@ class TestPluginChaos:
         fault = PluginFault(runner, FaultType.CRASH)
 
         async with fault.inject():
-            with pytest.raises(RuntimeError, match="Chaos.*SIGSEGV"):
+            with pytest.raises(RuntimeError, match=r"Chaos.*SIGSEGV"):
                 await runner.run_plugin("mod", "func")
 
     @pytest.mark.asyncio
@@ -617,7 +601,8 @@ class TestPluginChaos:
         async with fault.inject():
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    runner.run_plugin("mod", "func"), timeout=0.1,
+                    runner.run_plugin("mod", "func"),
+                    timeout=0.1,
                 )
 
     @pytest.mark.asyncio
@@ -644,10 +629,8 @@ class TestPluginChaos:
         fault = PluginFault(runner, FaultType.CRASH)
         async with fault.inject():
             for _ in range(3):
-                try:
+                with contextlib.suppress(RuntimeError):
                     await cb.call(runner.run_plugin, "mod", "func")
-                except RuntimeError:
-                    pass
 
             assert cb.state == CircuitState.OPEN
 
@@ -703,10 +686,8 @@ class TestPluginChaos:
         fault = PluginFault(runner, FaultType.CRASH)
         async with fault.inject():
             for _ in range(2):
-                try:
+                with contextlib.suppress(RuntimeError):
                     await cb.call(runner.run_plugin, "mod", "func")
-                except RuntimeError:
-                    pass
 
             result = await cb.call(runner.run_plugin, "mod", "func")
             assert result.success is False
@@ -728,7 +709,7 @@ class TestWorkerChaos:
         fault = WorkerFault(task, FaultType.CRASH)
 
         async with fault.inject():
-            with pytest.raises(ConnectionError, match="Chaos.*died"):
+            with pytest.raises(ConnectionError, match=r"Chaos.*died"):
                 task.delay()
 
     @pytest.mark.asyncio
@@ -750,7 +731,7 @@ class TestWorkerChaos:
         async with fault.inject():
             result = task.delay()
             assert result.ready() is False
-            with pytest.raises(TimeoutError, match="Chaos.*timed out"):
+            with pytest.raises(TimeoutError, match=r"Chaos.*timed out"):
                 result.get(timeout=1)
 
     @pytest.mark.asyncio
@@ -815,28 +796,23 @@ class TestCrossComponentChaos:
         llm_fault = LLMProviderFault(provider, FaultType.OUTAGE)
         vec_fault = VectorDBFault(store, FaultType.OUTAGE)
 
-        async with llm_fault.inject():
-            async with vec_fault.inject():
-                # Trip both breakers
-                for _ in range(2):
-                    try:
-                        await llm_cb.call(provider.ask, "test")
-                    except ConnectionError:
-                        pass
-                    try:
-                        await vec_cb.call(store.search, query_embedding=[0.1])
-                    except ConnectionError:
-                        pass
+        async with llm_fault.inject(), vec_fault.inject():
+            # Trip both breakers
+            for _ in range(2):
+                with contextlib.suppress(ConnectionError):
+                    await llm_cb.call(provider.ask, "test")
+                with contextlib.suppress(ConnectionError):
+                    await vec_cb.call(store.search, query_embedding=[0.1])
 
-                assert llm_cb.state == CircuitState.OPEN
-                assert vec_cb.state == CircuitState.OPEN
+            assert llm_cb.state == CircuitState.OPEN
+            assert vec_cb.state == CircuitState.OPEN
 
-                # Both fallbacks fire — no crash
-                llm_result = await llm_cb.call(provider.ask, "test")
-                vec_result = await vec_cb.call(store.search, query_embedding=[0.1])
+            # Both fallbacks fire — no crash
+            llm_result = await llm_cb.call(provider.ask, "test")
+            vec_result = await vec_cb.call(store.search, query_embedding=[0.1])
 
-                assert llm_result == "LLM unavailable"
-                assert vec_result == []
+            assert llm_result == "LLM unavailable"
+            assert vec_result == []
 
     @pytest.mark.asyncio
     async def test_cascading_failure_llm_then_plugin(self):
@@ -859,10 +835,8 @@ class TestCrossComponentChaos:
         llm_fault = LLMProviderFault(provider, FaultType.OUTAGE)
         async with llm_fault.inject():
             for _ in range(2):
-                try:
+                with contextlib.suppress(ConnectionError):
                     await llm_cb.call(provider.ask, "test")
-                except ConnectionError:
-                    pass
 
             assert llm_cb.state == CircuitState.OPEN
 
@@ -870,10 +844,8 @@ class TestCrossComponentChaos:
             plugin_fault = PluginFault(runner, FaultType.CRASH)
             async with plugin_fault.inject():
                 for _ in range(2):
-                    try:
+                    with contextlib.suppress(RuntimeError):
                         await plugin_cb.call(runner.run_plugin, "mod", "func")
-                    except RuntimeError:
-                        pass
 
                 assert plugin_cb.state == CircuitState.OPEN
 
@@ -896,17 +868,12 @@ class TestCrossComponentChaos:
         llm_fault = LLMProviderFault(provider, FaultType.OUTAGE)
         vec_fault = VectorDBFault(store, FaultType.OUTAGE)
 
-        async with llm_fault.inject():
-            async with vec_fault.inject():
-                for _ in range(2):
-                    try:
-                        await llm_cb.call(provider.ask, "test")
-                    except ConnectionError:
-                        pass
-                    try:
-                        await vec_cb.call(store.search, query_embedding=[0.1])
-                    except ConnectionError:
-                        pass
+        async with llm_fault.inject(), vec_fault.inject():
+            for _ in range(2):
+                with contextlib.suppress(ConnectionError):
+                    await llm_cb.call(provider.ask, "test")
+                with contextlib.suppress(ConnectionError):
+                    await vec_cb.call(store.search, query_embedding=[0.1])
 
         # Both faults cleared — wait for half-open
         await asyncio.sleep(0.15)
@@ -920,7 +887,7 @@ class TestCrossComponentChaos:
         assert llm_cb.state == CircuitState.CLOSED
 
         await store.add_embedding(id="p1", embedding=[0.1], text="probe data")
-        r2 = await vec_cb.call(store.search, query_embedding=[0.1])
+        await vec_cb.call(store.search, query_embedding=[0.1])
         assert vec_cb.state == CircuitState.CLOSED
 
 
@@ -969,7 +936,7 @@ class TestLoadGuardChaos:
     @pytest.mark.asyncio
     async def test_agent_limiter_rejects_when_full(self):
         """AgentExecutionLimiter rejects when at capacity."""
-        from app.reliability.load_guard import AgentExecutionLimiter, LoadGuardRejection
+        from app.reliability.load_guard import AgentExecutionLimiter, LoadGuardRejectionError
 
         limiter = AgentExecutionLimiter(max_agents=2, queue_timeout=0.05)
 
@@ -982,7 +949,7 @@ class TestLoadGuardChaos:
         await asyncio.sleep(0.05)  # Let them acquire
 
         # Third should be rejected
-        with pytest.raises(LoadGuardRejection):
+        with pytest.raises(LoadGuardRejectionError):
             await limiter.execute(_slow_agent)
 
         # Cancel background tasks
@@ -993,7 +960,7 @@ class TestLoadGuardChaos:
     @pytest.mark.asyncio
     async def test_request_queue_rejects_overflow(self):
         """RequestQueueLimiter rejects when queue is full."""
-        from app.reliability.load_guard import RequestQueueLimiter, LoadGuardRejection
+        from app.reliability.load_guard import LoadGuardRejectionError, RequestQueueLimiter
 
         limiter = RequestQueueLimiter(max_concurrent=1, queue_timeout=0.05)
 
@@ -1006,7 +973,7 @@ class TestLoadGuardChaos:
         await asyncio.sleep(0.05)
 
         # Second request should be rejected
-        with pytest.raises(LoadGuardRejection):
+        with pytest.raises(LoadGuardRejectionError):
             await limiter.execute(_slow)
 
         task.cancel()

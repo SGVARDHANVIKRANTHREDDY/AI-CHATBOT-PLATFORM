@@ -19,13 +19,16 @@ Design rationale:
     timer-based safety net that operates *outside* the agent loop and
     can cancel its asyncio tasks.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Optional, TypeVar
+from enum import StrEnum
+from typing import Any, TypeVar
 
 from app.shared.utils import get_logger
 
@@ -39,7 +42,7 @@ MAX_TOOL_CALLS = 20
 MAX_RUNTIME_SECONDS = 30
 
 
-class TerminationReason(str, Enum):
+class TerminationReason(StrEnum):
     COMPLETED = "completed"
     ITERATION_LIMIT = "iteration_limit"
     TOOL_CALL_LIMIT = "tool_call_limit"
@@ -56,7 +59,7 @@ class AgentExecutionContext:
     through AgentState / ReasoningGraphEngine so that each operation
     can check (and increment) the shared counters.
 
-    The ``check()`` method raises ``AgentBudgetExceeded`` when any
+    The ``check()`` method raises ``AgentBudgetExceededError`` when any
     limit is breached, giving the caller an opportunity to capture
     partial results before exiting.
     """
@@ -75,7 +78,7 @@ class AgentExecutionContext:
     _start_time: float = field(default_factory=time.monotonic)
 
     # Bookkeeping
-    partial_results: List[Dict[str, Any]] = field(default_factory=list)
+    partial_results: list[dict[str, Any]] = field(default_factory=list)
     termination_reason: TerminationReason = TerminationReason.COMPLETED
     _cancelled: bool = False
 
@@ -118,10 +121,10 @@ class AgentExecutionContext:
         self._cancelled = True
 
     def check(self) -> None:
-        """Raise AgentBudgetExceeded if any budget is exhausted."""
+        """Raise AgentBudgetExceededError if any budget is exhausted."""
         if self._cancelled:
             self.termination_reason = TerminationReason.CANCELLED
-            raise AgentBudgetExceeded(self, TerminationReason.CANCELLED)
+            raise AgentBudgetExceededError(self, TerminationReason.CANCELLED)
 
         if self.iteration_count >= self.max_iterations:
             self.termination_reason = TerminationReason.ITERATION_LIMIT
@@ -130,7 +133,7 @@ class AgentExecutionContext:
                 self.execution_id,
                 self.max_iterations,
             )
-            raise AgentBudgetExceeded(self, TerminationReason.ITERATION_LIMIT)
+            raise AgentBudgetExceededError(self, TerminationReason.ITERATION_LIMIT)
 
         if self.tool_call_count >= self.max_tool_calls:
             self.termination_reason = TerminationReason.TOOL_CALL_LIMIT
@@ -139,7 +142,7 @@ class AgentExecutionContext:
                 self.execution_id,
                 self.max_tool_calls,
             )
-            raise AgentBudgetExceeded(self, TerminationReason.TOOL_CALL_LIMIT)
+            raise AgentBudgetExceededError(self, TerminationReason.TOOL_CALL_LIMIT)
 
         if self.elapsed_seconds >= self.max_runtime_seconds:
             self.termination_reason = TerminationReason.RUNTIME_LIMIT
@@ -148,13 +151,13 @@ class AgentExecutionContext:
                 self.execution_id,
                 self.max_runtime_seconds,
             )
-            raise AgentBudgetExceeded(self, TerminationReason.RUNTIME_LIMIT)
+            raise AgentBudgetExceededError(self, TerminationReason.RUNTIME_LIMIT)
 
-    def save_partial(self, result: Dict[str, Any]) -> None:
+    def save_partial(self, result: dict[str, Any]) -> None:
         """Stash a partial result so the caller can return *something*."""
         self.partial_results.append(result)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "execution_id": self.execution_id,
             "iterations": self.iteration_count,
@@ -165,12 +168,10 @@ class AgentExecutionContext:
         }
 
 
-class AgentBudgetExceeded(Exception):
+class AgentBudgetExceededError(Exception):
     """Raised when an agent exceeds its execution budget."""
 
-    def __init__(
-        self, ctx: AgentExecutionContext, reason: TerminationReason
-    ) -> None:
+    def __init__(self, ctx: AgentExecutionContext, reason: TerminationReason) -> None:
         self.ctx = ctx
         self.reason = reason
         super().__init__(
@@ -204,8 +205,8 @@ class AgentWatchdog:
 
     def __init__(self, poll_interval: float = 1.0) -> None:
         self.poll_interval = poll_interval
-        self._executions: Dict[str, _WatchedExecution] = {}
-        self._monitor_task: Optional[asyncio.Task] = None
+        self._executions: dict[str, _WatchedExecution] = {}
+        self._monitor_task: asyncio.Task | None = None
 
     # ── Registration ──────────────────────────────────────────────
 
@@ -242,7 +243,7 @@ class AgentWatchdog:
         if execution_id in self._executions:
             self._executions[execution_id].task = task
 
-    def unregister(self, execution_id: str) -> Optional[AgentExecutionContext]:
+    def unregister(self, execution_id: str) -> AgentExecutionContext | None:
         """Remove an execution from monitoring and return its context."""
         watched = self._executions.pop(execution_id, None)
         if watched:
@@ -269,7 +270,7 @@ class AgentWatchdog:
         _LOG.debug("Watchdog monitor loop started")
         try:
             while self._executions:
-                to_kill: List[str] = []
+                to_kill: list[str] = []
                 for eid, watched in list(self._executions.items()):
                     ctx = watched.ctx
                     if ctx.elapsed_seconds >= ctx.max_runtime_seconds:
@@ -296,8 +297,7 @@ class AgentWatchdog:
         if watched.task and not watched.task.done():
             watched.task.cancel()
             _LOG.warning(
-                "Watchdog: FORCE-TERMINATED execution %s after %.1fs "
-                "(iters=%d, tools=%d)",
+                "Watchdog: FORCE-TERMINATED execution %s after %.1fs (iters=%d, tools=%d)",
                 execution_id,
                 ctx.elapsed_seconds,
                 ctx.iteration_count,
@@ -312,15 +312,13 @@ class AgentWatchdog:
         # Emit telemetry
         try:
             from app.shared.monitoring import (
-                WATCHDOG_TERMINATIONS,
                 WATCHDOG_EXECUTION_DURATION,
+                WATCHDOG_TERMINATIONS,
             )
 
-            WATCHDOG_TERMINATIONS.labels(
-                reason=ctx.termination_reason.value
-            ).inc()
+            WATCHDOG_TERMINATIONS.labels(reason=ctx.termination_reason.value).inc()
             WATCHDOG_EXECUTION_DURATION.observe(ctx.elapsed_seconds)
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # telemetry failure must not break the watchdog
 
     # ── Convenience: run a coroutine under watchdog protection ────
@@ -368,7 +366,7 @@ class AgentWatchdog:
                     len(ctx.partial_results),
                 )
                 return None, ctx
-            except AgentBudgetExceeded:
+            except AgentBudgetExceededError:
                 _LOG.warning(
                     "Watchdog: execution %s hit budget (%s)",
                     execution_id,
@@ -393,7 +391,7 @@ class AgentWatchdog:
                 result = await _wrapped()
                 ctx.termination_reason = TerminationReason.COMPLETED
                 return result, ctx
-            except (asyncio.CancelledError, AgentBudgetExceeded):
+            except (asyncio.CancelledError, AgentBudgetExceededError):
                 return None, ctx
             except Exception:
                 ctx.termination_reason = TerminationReason.ERROR
@@ -413,7 +411,7 @@ class AgentWatchdog:
             WATCHDOG_EXECUTION_DURATION.observe(ctx.elapsed_seconds)
             WATCHDOG_ITERATIONS_USED.observe(ctx.iteration_count)
             WATCHDOG_TOOL_CALLS_USED.observe(ctx.tool_call_count)
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
     async def shutdown(self) -> None:
@@ -422,10 +420,8 @@ class AgentWatchdog:
             self._terminate(eid)
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._monitor_task
-            except asyncio.CancelledError:
-                pass
         self._executions.clear()
         _LOG.info("Watchdog shut down")
 
@@ -433,4 +429,4 @@ class AgentWatchdog:
 @dataclass
 class _WatchedExecution:
     ctx: AgentExecutionContext
-    task: Optional[asyncio.Task] = None
+    task: asyncio.Task | None = None

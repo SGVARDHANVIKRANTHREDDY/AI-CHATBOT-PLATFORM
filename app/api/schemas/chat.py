@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import List, Optional
+
 from pydantic import BaseModel, Field
-from app.shared.types import AnswerContract, Citation
+
+from app.shared.types import AnswerContract
+
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, description="User question")
@@ -9,13 +11,15 @@ class ChatRequest(BaseModel):
     use_rag: bool = True
     use_web: bool = False
     use_memory: bool = True
-    rag_top_k: Optional[int] = Field(default=None, ge=1, le=50)
-    system_prompt: Optional[str] = None
+    rag_top_k: int | None = Field(default=None, ge=1, le=50)
+    system_prompt: str | None = None
+
 
 class ChatResponse(BaseModel):
     ok: bool = True
     result: AnswerContract
     response: str
+
 
 class ErrorResponse(BaseModel):
     ok: bool = False

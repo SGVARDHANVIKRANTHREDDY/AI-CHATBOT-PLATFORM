@@ -5,12 +5,14 @@ Runs VectorMaintenanceManager.run_full_maintenance() on a schedule
 (daily by default) to deduplicate, remove stale entries, reindex,
 and compress old vectors.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
+
+from app.shared.utils import get_logger
 
 from workers.celery_app import celery_app
-from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
@@ -24,9 +26,9 @@ _LOG = get_logger(__name__)
 )
 def run_vector_maintenance(
     self,
-    memory_types: Optional[list] = None,
-    config_overrides: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    memory_types: list | None = None,
+    config_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Celery task: Run full vector maintenance for all memory types.
 
     Args:
@@ -41,12 +43,12 @@ def run_vector_maintenance(
     from app.vector_memory.maintenance import VectorMaintenanceManager
 
     types = memory_types or ["episodic", "semantic", "profile"]
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
 
     for mt in types:
         _LOG.info("Running maintenance for memory type: %s", mt)
         try:
-            kwargs: Dict[str, Any] = {"memory_type": mt}
+            kwargs: dict[str, Any] = {"memory_type": mt}
             if config_overrides:
                 kwargs.update(config_overrides)
             manager = VectorMaintenanceManager(**kwargs)

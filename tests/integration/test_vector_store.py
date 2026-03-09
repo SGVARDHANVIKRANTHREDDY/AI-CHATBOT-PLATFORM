@@ -7,20 +7,16 @@ against the FAISS backend (runs without external services).
 The same tests can run against QdrantVectorStore by swapping the
 ``store`` fixture (requires a running Qdrant instance).
 """
+
 from __future__ import annotations
 
 import asyncio
 import uuid
-from pathlib import Path
-from typing import List
-from unittest.mock import patch
 
 import numpy as np
 import pytest
-
-from app.vector_memory.base import SearchResult, VectorRecord, VectorStore
+from app.vector_memory.base import SearchResult, VectorRecord
 from app.vector_memory.faiss_store import FAISSVectorStore
-
 
 # ── Constants ─────────────────────────────────────────────────────
 
@@ -43,12 +39,11 @@ def _make_record(text: str = "", dim: int = DIM) -> VectorRecord:
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     """Provide a clean FAISS store pointed at a temp directory."""
-    monkeypatch.setattr(
-        "app.config.settings.settings.VECTOR_INDEX_DIR", tmp_path
-    )
+    monkeypatch.setattr("app.config.settings.settings.VECTOR_INDEX_DIR", tmp_path)
     s = FAISSVectorStore(collection_name="test_collection", embedding_dim=DIM)
     # initialize() and close() are async wrappers over sync code in FAISS backend
     s._load()
@@ -60,6 +55,7 @@ def store(tmp_path, monkeypatch):
 # Test: Concurrent Inserts
 # ═════════════════════════════════════════════════════════════════
 
+
 class TestConcurrentInserts:
     """Verify that many simultaneous add_embedding / batch_insert calls
     are safe and all records land in the store."""
@@ -69,12 +65,7 @@ class TestConcurrentInserts:
         """Launch 20 add_embedding calls concurrently."""
         records = [_make_record() for _ in range(20)]
 
-        tasks = [
-            store.add_embedding(
-                id=r.id, embedding=r.embedding, text=r.text, metadata=r.metadata
-            )
-            for r in records
-        ]
+        tasks = [store.add_embedding(id=r.id, embedding=r.embedding, text=r.text, metadata=r.metadata) for r in records]
         await asyncio.gather(*tasks)
 
         count = await store.count()
@@ -83,9 +74,7 @@ class TestConcurrentInserts:
     @pytest.mark.asyncio
     async def test_batch_insert_concurrent(self, store: FAISSVectorStore):
         """Launch 5 batch_insert calls of 10 records each concurrently."""
-        batches: List[List[VectorRecord]] = [
-            [_make_record() for _ in range(10)] for _ in range(5)
-        ]
+        batches: list[list[VectorRecord]] = [[_make_record() for _ in range(10)] for _ in range(5)]
 
         tasks = [store.batch_insert(batch) for batch in batches]
         results = await asyncio.gather(*tasks)
@@ -99,12 +88,7 @@ class TestConcurrentInserts:
         singles = [_make_record() for _ in range(5)]
         batch = [_make_record() for _ in range(10)]
 
-        tasks = [
-            store.add_embedding(
-                id=r.id, embedding=r.embedding, text=r.text, metadata=r.metadata
-            )
-            for r in singles
-        ]
+        tasks = [store.add_embedding(id=r.id, embedding=r.embedding, text=r.text, metadata=r.metadata) for r in singles]
         tasks.append(store.batch_insert(batch))
         await asyncio.gather(*tasks)
 
@@ -114,9 +98,7 @@ class TestConcurrentInserts:
     async def test_insert_preserves_text(self, store: FAISSVectorStore):
         """Inserted text should be retrievable via search."""
         rec = _make_record(text="unique-canary-text")
-        await store.add_embedding(
-            id=rec.id, embedding=rec.embedding, text=rec.text, metadata=rec.metadata
-        )
+        await store.add_embedding(id=rec.id, embedding=rec.embedding, text=rec.text, metadata=rec.metadata)
 
         results = await store.search(rec.embedding, top_k=1)
         assert len(results) == 1
@@ -126,6 +108,7 @@ class TestConcurrentInserts:
 # ═════════════════════════════════════════════════════════════════
 # Test: Concurrent Searches
 # ═════════════════════════════════════════════════════════════════
+
 
 class TestConcurrentSearches:
     """Verify that many simultaneous search calls return consistent results."""
@@ -156,16 +139,11 @@ class TestConcurrentSearches:
         noise = [_random_embedding() for _ in range(10)]
 
         # Insert noise first
-        noise_records = [
-            VectorRecord(id=uuid.uuid4().hex, embedding=n, text=f"noise-{i}")
-            for i, n in enumerate(noise)
-        ]
+        noise_records = [VectorRecord(id=uuid.uuid4().hex, embedding=n, text=f"noise-{i}") for i, n in enumerate(noise)]
         await store.batch_insert(noise_records)
 
         # Insert the target (exact match)
-        await store.add_embedding(
-            id="target", embedding=target, text="target-text"
-        )
+        await store.add_embedding(id="target", embedding=target, text="target-text")
 
         results = await store.search(target, top_k=3)
         assert results[0].text == "target-text"
@@ -188,15 +166,14 @@ class TestConcurrentSearches:
         await store.add_embedding(id=r1.id, embedding=r1.embedding, text=r1.text, metadata=r1.metadata)
         await store.add_embedding(id=r2.id, embedding=r2.embedding, text=r2.text, metadata=r2.metadata)
 
-        results = await store.search(
-            r1.embedding, top_k=5, filters={"animal": "cat"}
-        )
+        results = await store.search(r1.embedding, top_k=5, filters={"animal": "cat"})
         assert all(r.metadata.get("animal") == "cat" for r in results)
 
 
 # ═════════════════════════════════════════════════════════════════
 # Test: Index Rebuild (Delete + Re-insert)
 # ═════════════════════════════════════════════════════════════════
+
 
 class TestIndexRebuild:
     """Verify that deletion and re-insertion keep the index consistent."""

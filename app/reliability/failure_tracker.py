@@ -10,13 +10,13 @@ Design rationale:
     retrying).  A single FailureTracker instance per logical component
     lets every reliability primitive see the same view of health.
 """
+
 from __future__ import annotations
 
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
-from typing import Deque, Dict, Optional
+from dataclasses import dataclass
 
 from app.shared.utils import get_logger
 
@@ -26,6 +26,7 @@ _LOG = get_logger(__name__)
 @dataclass
 class FailureRecord:
     """Immutable record of a single failure event."""
+
     timestamp: float
     error_type: str
     message: str
@@ -34,11 +35,12 @@ class FailureRecord:
 @dataclass
 class FailureStats:
     """Point-in-time snapshot of failure statistics."""
+
     total_failures: int = 0
     total_successes: int = 0
     failure_rate: float = 0.0
-    last_failure_time: Optional[float] = None
-    last_failure_type: Optional[str] = None
+    last_failure_time: float | None = None
+    last_failure_type: str | None = None
     window_failures: int = 0
     window_successes: int = 0
 
@@ -66,8 +68,8 @@ class FailureTracker:
         self.max_records = max_records
 
         self._lock = threading.Lock()
-        self._failures: Deque[FailureRecord] = deque(maxlen=max_records)
-        self._success_timestamps: Deque[float] = deque(maxlen=max_records)
+        self._failures: deque[FailureRecord] = deque(maxlen=max_records)
+        self._success_timestamps: deque[float] = deque(maxlen=max_records)
         self._total_failures: int = 0
         self._total_successes: int = 0
 
@@ -104,16 +106,10 @@ class FailureTracker:
         cutoff = now - self.window_seconds
 
         with self._lock:
-            window_failures = sum(
-                1 for r in self._failures if r.timestamp >= cutoff
-            )
-            window_successes = sum(
-                1 for t in self._success_timestamps if t >= cutoff
-            )
+            window_failures = sum(1 for r in self._failures if r.timestamp >= cutoff)
+            window_successes = sum(1 for t in self._success_timestamps if t >= cutoff)
             total_in_window = window_failures + window_successes
-            failure_rate = (
-                window_failures / total_in_window if total_in_window > 0 else 0.0
-            )
+            failure_rate = window_failures / total_in_window if total_in_window > 0 else 0.0
             last = self._failures[-1] if self._failures else None
 
         return FailureStats(

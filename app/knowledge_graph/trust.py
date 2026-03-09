@@ -6,9 +6,9 @@ low-quality, adversarial, or unverifiable content from polluting
 the knowledge base.
 
 Scoring dimensions:
-    source_score         — Domain reputation heuristic (0.0–1.0)
-    content_quality_score — Text quality via structural heuristics (0.0–1.0)
-    verification_status   — UNVERIFIED | VERIFIED | REJECTED
+    source_score         - Domain reputation heuristic (0.0-1.0)
+    content_quality_score - Text quality via structural heuristics (0.0-1.0)
+    verification_status   - UNVERIFIED | VERIFIED | REJECTED
 
 Design rationale:
     The knowledge crawler ingests anything it fetches.  Without trust
@@ -16,12 +16,12 @@ Design rationale:
     RAG store and poisons agent reasoning.  This evaluator sits between
     crawling and embedding.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from app.shared.utils import get_logger
@@ -31,6 +31,7 @@ _LOG = get_logger(__name__)
 
 class VerificationStatus(Enum):
     """Trust verification state of a document."""
+
     UNVERIFIED = "unverified"
     VERIFIED = "verified"
     REJECTED = "rejected"
@@ -39,12 +40,13 @@ class VerificationStatus(Enum):
 @dataclass
 class TrustResult:
     """Trust evaluation result for a single document."""
+
     url: str
-    source_score: float          # 0.0–1.0
-    content_quality_score: float  # 0.0–1.0
+    source_score: float  # 0.0-1.0
+    content_quality_score: float  # 0.0-1.0
     verification_status: VerificationStatus
-    overall_score: float          # Weighted composite
-    rejection_reasons: List[str]
+    overall_score: float  # Weighted composite
+    rejection_reasons: list[str]
 
     @property
     def is_trusted(self) -> bool:
@@ -52,7 +54,7 @@ class TrustResult:
 
 
 # ─── Domain reputation lists ─────────────────────────────────────
-HIGH_TRUST_DOMAINS: Set[str] = {
+HIGH_TRUST_DOMAINS: set[str] = {
     "docs.python.org",
     "redis.io",
     "fastapi.tiangolo.com",
@@ -73,7 +75,7 @@ HIGH_TRUST_DOMAINS: Set[str] = {
     "kubernetes.io",
 }
 
-LOW_TRUST_PATTERNS: List[re.Pattern] = [
+LOW_TRUST_PATTERNS: list[re.Pattern] = [
     re.compile(r"(?i)(spam|phishing|malware|clickbait)"),
     re.compile(r"(?i)\.(tk|ml|ga|cf|gq)$"),  # Free TLDs often abused
 ]
@@ -83,7 +85,7 @@ class SourceTrustEvaluator:
     """Evaluates trustworthiness of documents for knowledge ingestion.
 
     Args:
-        trust_threshold: Minimum overall score for ingestion (0.0–1.0).
+        trust_threshold: Minimum overall score for ingestion (0.0-1.0).
         source_weight: Weight of source_score in overall calculation.
         quality_weight: Weight of content_quality_score in overall calculation.
         custom_trusted_domains: Additional domains to trust.
@@ -94,7 +96,7 @@ class SourceTrustEvaluator:
         trust_threshold: float = 0.5,
         source_weight: float = 0.4,
         quality_weight: float = 0.6,
-        custom_trusted_domains: Optional[Set[str]] = None,
+        custom_trusted_domains: set[str] | None = None,
     ) -> None:
         self.trust_threshold = trust_threshold
         self.source_weight = source_weight
@@ -113,23 +115,18 @@ class SourceTrustEvaluator:
         Returns:
             TrustResult with all scores and verification status.
         """
-        reasons: List[str] = []
+        reasons: list[str] = []
 
         source_score = self._evaluate_source(url, reasons)
         quality_score = self._evaluate_content_quality(content, reasons)
-        overall = (
-            source_score * self.source_weight
-            + quality_score * self.quality_weight
-        )
+        overall = source_score * self.source_weight + quality_score * self.quality_weight
 
         if overall >= self.trust_threshold and not reasons:
             status = VerificationStatus.VERIFIED
         elif overall < self.trust_threshold:
             status = VerificationStatus.REJECTED
             if not reasons:
-                reasons.append(
-                    f"Overall score {overall:.2f} below threshold {self.trust_threshold}"
-                )
+                reasons.append(f"Overall score {overall:.2f} below threshold {self.trust_threshold}")
         else:
             status = VerificationStatus.UNVERIFIED
 
@@ -163,13 +160,12 @@ class SourceTrustEvaluator:
             True if the document passes the trust threshold.
         """
         return (
-            result.verification_status != VerificationStatus.REJECTED
-            and result.overall_score >= self.trust_threshold
+            result.verification_status != VerificationStatus.REJECTED and result.overall_score >= self.trust_threshold
         )
 
     # ── Private scoring methods ───────────────────────────────────
 
-    def _evaluate_source(self, url: str, reasons: List[str]) -> float:
+    def _evaluate_source(self, url: str, reasons: list[str]) -> float:
         """Score the source URL based on domain reputation."""
         try:
             parsed = urlparse(url)
@@ -204,9 +200,7 @@ class SourceTrustEvaluator:
             reasons.append(f"Source evaluation error: {e}")
             return 0.3
 
-    def _evaluate_content_quality(
-        self, content: str, reasons: List[str]
-    ) -> float:
+    def _evaluate_content_quality(self, content: str, reasons: list[str]) -> float:
         """Score content quality based on structural heuristics."""
         if not content or not content.strip():
             reasons.append("Empty content")

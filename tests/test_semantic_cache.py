@@ -11,19 +11,20 @@ Covers:
     7. TTL propagation
     8. Metric instrumentation
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import time
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────
+
 
 def _make_embedding(seed: int, dim: int = 384) -> np.ndarray:
     """Deterministic normalised embedding from a seed."""
@@ -52,12 +53,12 @@ class FakeRedis:
     """
 
     def __init__(self) -> None:
-        self._store: Dict[str, bytes] = {}
-        self._zset: Dict[str, Dict[str, float]] = {}  # key -> {member: score}
+        self._store: dict[str, bytes] = {}
+        self._zset: dict[str, dict[str, float]] = {}  # key -> {member: score}
 
     # ── key/value ─────────────────────────────────────────────
 
-    async def get(self, key: str) -> Optional[bytes]:
+    async def get(self, key: str) -> bytes | None:
         return self._store.get(key)
 
     async def set(self, key: str, value: Any, ex: int | None = None) -> None:
@@ -75,7 +76,7 @@ class FakeRedis:
 
     # ── sorted set ────────────────────────────────────────────
 
-    async def zadd(self, key: str, mapping: Dict[str, float]) -> int:
+    async def zadd(self, key: str, mapping: dict[str, float]) -> int:
         zs = self._zset.setdefault(key, {})
         added = 0
         for member, score in mapping.items():
@@ -97,53 +98,51 @@ class FakeRedis:
     async def zcard(self, key: str) -> int:
         return len(self._zset.get(key, {}))
 
-    async def zrange(self, key: str, start: int, stop: int) -> List[bytes]:
+    async def zrange(self, key: str, start: int, stop: int) -> list[bytes]:
         zs = self._zset.get(key, {})
         ordered = sorted(zs.items(), key=lambda x: x[1])
         # Redis zrange is inclusive on both ends
-        subset = ordered[start: stop + 1]
+        subset = ordered[start : stop + 1]
         return [m.encode("utf-8") for m, _ in subset]
 
-    async def zrangebyscore(
-        self, key: str, min_score: str, max_score: str
-    ) -> List[bytes]:
+    async def zrangebyscore(self, key: str, min_score: str, max_score: str) -> list[bytes]:
         zs = self._zset.get(key, {})
         ordered = sorted(zs.items(), key=lambda x: x[1])
         return [m.encode("utf-8") for m, _ in ordered]
 
     # ── pipeline ──────────────────────────────────────────────
 
-    def pipeline(self, transaction: bool = False) -> "FakePipeline":
+    def pipeline(self, transaction: bool = False) -> FakePipeline:
         return FakePipeline(self)
 
 
 class FakePipeline:
     def __init__(self, redis: FakeRedis) -> None:
         self._redis = redis
-        self._ops: List[Any] = []
+        self._ops: list[Any] = []
 
-    def get(self, key: str) -> "FakePipeline":
+    def get(self, key: str) -> FakePipeline:
         self._ops.append(("get", key))
         return self
 
-    def set(self, key: str, value: Any, ex: int | None = None) -> "FakePipeline":
+    def set(self, key: str, value: Any, ex: int | None = None) -> FakePipeline:
         self._ops.append(("set", key, value, ex))
         return self
 
-    def delete(self, key: str) -> "FakePipeline":
+    def delete(self, key: str) -> FakePipeline:
         self._ops.append(("delete", key))
         return self
 
-    def zadd(self, key: str, mapping: Dict[str, float]) -> "FakePipeline":
+    def zadd(self, key: str, mapping: dict[str, float]) -> FakePipeline:
         self._ops.append(("zadd", key, mapping))
         return self
 
-    def zrem(self, key: str, *members: str) -> "FakePipeline":
+    def zrem(self, key: str, *members: str) -> FakePipeline:
         self._ops.append(("zrem", key, *members))
         return self
 
-    async def execute(self) -> List[Any]:
-        results: List[Any] = []
+    async def execute(self) -> list[Any]:
+        results: list[Any] = []
         for op in self._ops:
             if op[0] == "get":
                 results.append(await self._redis.get(op[1]))
@@ -178,7 +177,7 @@ def _build_cache(threshold: float = 0.92, max_entries: int = 100, ttl: int = 360
     cache._model = None
 
     # Deterministic embeddings: each unique string maps to a deterministic vector
-    _embedding_map: Dict[str, np.ndarray] = {}
+    _embedding_map: dict[str, np.ndarray] = {}
     _counter = [0]
 
     def _encode(text: str) -> np.ndarray:
@@ -197,10 +196,9 @@ def _build_cache(threshold: float = 0.92, max_entries: int = 100, ttl: int = 360
 
 
 class TestSimilarityLookup:
-
     @pytest.mark.asyncio
     async def test_exact_same_query_returns_cached(self):
-        cache, emb_map = _build_cache(threshold=0.90)
+        cache, _emb_map = _build_cache(threshold=0.90)
 
         await cache.set("What is Python?", "A programming language.")
         result = await cache.get("What is Python?")
@@ -209,13 +207,14 @@ class TestSimilarityLookup:
     @pytest.mark.asyncio
     async def test_similar_query_hits_cache(self):
         """Two queries that produce embeddings with cosine > threshold → hit."""
-        cache, emb_map = _build_cache(threshold=0.90)
+        cache, _emb_map = _build_cache(threshold=0.90)
 
         base_emb = _make_embedding(42)
         similar_emb = _similar_embedding(base_emb, noise=0.01)
 
         # Override encode to return controlled embeddings
         call_count = [0]
+
         def _encode(text: str) -> np.ndarray:
             call_count[0] += 1
             if text == "query A":
@@ -233,7 +232,7 @@ class TestSimilarityLookup:
     @pytest.mark.asyncio
     async def test_dissimilar_query_misses(self):
         """Two orthogonal embeddings → cache miss."""
-        cache, emb_map = _build_cache(threshold=0.90)
+        cache, _emb_map = _build_cache(threshold=0.90)
 
         emb_a = _make_embedding(0)
         emb_b = _make_embedding(1)
@@ -280,7 +279,6 @@ class TestSimilarityLookup:
 
 
 class TestLRUEviction:
-
     @pytest.mark.asyncio
     async def test_eviction_removes_oldest(self):
         cache, _ = _build_cache(max_entries=3)
@@ -353,14 +351,12 @@ class TestLRUEviction:
             await cache.set("q3", "a3")
 
 
-
 # ═════════════════════════════════════════════════════════════════
 # Concurrent operations
 # ═════════════════════════════════════════════════════════════════
 
 
 class TestConcurrency:
-
     @pytest.mark.asyncio
     async def test_concurrent_sets(self):
         cache, _ = _build_cache(max_entries=50)
@@ -402,7 +398,6 @@ class TestConcurrency:
 
 
 class TestInvalidateAndClear:
-
     @pytest.mark.asyncio
     async def test_invalidate_removes_entry(self):
         cache, _ = _build_cache()
@@ -439,7 +434,6 @@ class TestInvalidateAndClear:
 
 
 class TestDisabledCache:
-
     @pytest.mark.asyncio
     async def test_get_returns_none_when_disabled(self):
         cache, _ = _build_cache()
@@ -466,7 +460,6 @@ class TestDisabledCache:
 
 
 class TestMetrics:
-
     @pytest.mark.asyncio
     async def test_hit_increments_counter(self):
         from app.shared.monitoring import SEMANTIC_CACHE_HITS

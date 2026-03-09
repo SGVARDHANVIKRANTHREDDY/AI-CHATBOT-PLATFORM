@@ -13,11 +13,13 @@ Design rationale:
     • Does NOT interfere with CircuitBreaker — they compose naturally:
         CircuitBreaker wraps RetryPolicy wraps the actual call.
 """
+
 from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Callable, Coroutine, Optional, Sequence, Tuple, Type, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 from app.reliability.failure_tracker import FailureTracker
 from app.shared.utils import get_logger
@@ -27,7 +29,7 @@ _LOG = get_logger(__name__)
 T = TypeVar("T")
 
 # Default set of transient exceptions worth retrying
-DEFAULT_RETRYABLE: Tuple[Type[Exception], ...] = (
+DEFAULT_RETRYABLE: tuple[type[Exception], ...] = (
     ConnectionError,
     TimeoutError,
     asyncio.TimeoutError,
@@ -42,9 +44,7 @@ class RetryExhaustedError(Exception):
         self.component = component
         self.attempts = attempts
         self.last_error = last_error
-        super().__init__(
-            f"Retry exhausted for '{component}' after {attempts} attempts: {last_error}"
-        )
+        super().__init__(f"Retry exhausted for '{component}' after {attempts} attempts: {last_error}")
 
 
 class RetryPolicy:
@@ -71,8 +71,8 @@ class RetryPolicy:
         max_retries: int = 3,
         base_delay: float = 1.0,
         max_delay: float = 30.0,
-        retryable_exceptions: Tuple[Type[Exception], ...] = DEFAULT_RETRYABLE,
-        tracker: Optional[FailureTracker] = None,
+        retryable_exceptions: tuple[type[Exception], ...] = DEFAULT_RETRYABLE,
+        tracker: FailureTracker | None = None,
     ) -> None:
         self.component_name = component_name
         self.max_retries = max_retries
@@ -96,7 +96,7 @@ class RetryPolicy:
             RetryExhaustedError: If all retries fail.
             Exception: Re-raises non-retryable exceptions immediately.
         """
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         delay = self.base_delay
 
         for attempt in range(1, self.max_retries + 2):  # +2 because range is exclusive and attempt 1 is initial
@@ -104,9 +104,7 @@ class RetryPolicy:
                 result = await coro_fn(*args, **kwargs)
                 self.tracker.record_success()
                 if attempt > 1:
-                    _LOG.info(
-                        "%s: Succeeded on attempt %d", self.component_name, attempt
-                    )
+                    _LOG.info("%s: Succeeded on attempt %d", self.component_name, attempt)
                 return result
             except self.retryable_exceptions as exc:
                 last_error = exc
@@ -116,7 +114,7 @@ class RetryPolicy:
                     break
 
                 # Decorrelated jitter
-                delay = min(self.max_delay, random.uniform(self.base_delay, delay * 3))
+                delay = min(self.max_delay, random.uniform(self.base_delay, delay * 3))  # noqa: S311
 
                 _LOG.warning(
                     "%s: Attempt %d failed (%s). Retrying in %.2fs…",
@@ -138,6 +136,4 @@ class RetryPolicy:
                 raise
 
         assert last_error is not None
-        raise RetryExhaustedError(
-            self.component_name, self.max_retries + 1, last_error
-        )
+        raise RetryExhaustedError(self.component_name, self.max_retries + 1, last_error)

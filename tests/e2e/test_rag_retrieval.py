@@ -4,18 +4,17 @@ E2E Test: RAG Retrieval with Trust Scoring
 Tests the trust evaluation pipeline for knowledge ingestion,
 verifying that low-quality and untrusted content is rejected.
 """
+
 from __future__ import annotations
 
 import pytest
-
 from app.knowledge_graph.trust import (
     SourceTrustEvaluator,
-    TrustResult,
     VerificationStatus,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def trust_evaluator():
@@ -28,6 +27,7 @@ def strict_evaluator():
 
 
 # ── Trust Evaluator Tests ────────────────────────────────────────
+
 
 class TestSourceTrustEvaluator:
     """Tests for the SourceTrustEvaluator."""
@@ -144,9 +144,7 @@ class TestSourceTrustEvaluator:
 
     def test_custom_trusted_domains(self):
         """Custom trusted domains are supported."""
-        evaluator = SourceTrustEvaluator(
-            custom_trusted_domains={"internal-wiki.company.com"}
-        )
+        evaluator = SourceTrustEvaluator(custom_trusted_domains={"internal-wiki.company.com"})
         result = evaluator.evaluate(
             "https://internal-wiki.company.com/page",
             "Internal knowledge base article. " * 20,
@@ -167,9 +165,7 @@ class TestSourceTrustEvaluator:
 
     def test_trust_result_dataclass(self, trust_evaluator):
         """TrustResult has all expected fields."""
-        result = trust_evaluator.evaluate(
-            "https://example.com", "Test content. " * 20
-        )
+        result = trust_evaluator.evaluate("https://example.com", "Test content. " * 20)
         assert hasattr(result, "url")
         assert hasattr(result, "source_score")
         assert hasattr(result, "content_quality_score")

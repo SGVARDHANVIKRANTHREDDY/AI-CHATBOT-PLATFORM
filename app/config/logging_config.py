@@ -1,9 +1,8 @@
+import json
 import logging
 import os
-import json
 import traceback
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 _LOGGING_CONFIGURED = False
 
@@ -18,9 +17,7 @@ class ELKJsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict = {
-            "@timestamp": datetime.fromtimestamp(
-                record.created, tz=timezone.utc
-            ).isoformat(timespec="milliseconds"),
+            "@timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(timespec="milliseconds"),
             "log.level": record.levelname,
             "log.logger": record.name,
             "message": record.getMessage(),
@@ -36,14 +33,12 @@ class ELKJsonFormatter(logging.Formatter):
         if record.exc_info and record.exc_info[0] is not None:
             payload["error.type"] = record.exc_info[0].__name__
             payload["error.message"] = str(record.exc_info[1])
-            payload["error.stack_trace"] = "".join(
-                traceback.format_exception(*record.exc_info)
-            )
+            payload["error.stack_trace"] = "".join(traceback.format_exception(*record.exc_info))
 
         return json.dumps(payload, default=str, ensure_ascii=False)
 
 
-def configure_logging(*, level: Optional[str] = None) -> None:
+def configure_logging(*, level: str | None = None) -> None:
     """Configure global logging once."""
     global _LOGGING_CONFIGURED
     if _LOGGING_CONFIGURED:
@@ -62,10 +57,6 @@ def configure_logging(*, level: Optional[str] = None) -> None:
     if log_format == "json":
         handler.setFormatter(ELKJsonFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-            )
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s"))
     root.addHandler(handler)
     _LOGGING_CONFIGURED = True

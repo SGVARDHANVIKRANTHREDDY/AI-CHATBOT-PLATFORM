@@ -17,6 +17,7 @@ Security invariants enforced at the OS level by the PARENT process:
 This file deliberately avoids importing any application code except
 the plugin protocol, so the subprocess stays lightweight.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +27,6 @@ import json
 import os
 import sys
 import time
-import traceback
 
 
 def _sanitize_environment() -> None:
@@ -60,7 +60,7 @@ def _read_request() -> dict:
 def _write_response(resp: dict) -> None:
     """Write a length-prefixed JSON response to stdout (binary)."""
     payload = json.dumps(resp, default=str).encode("utf-8")
-    header = f"{len(payload)}\n".encode("utf-8")
+    header = f"{len(payload)}\n".encode()
     sys.stdout.buffer.write(header)
     sys.stdout.buffer.write(payload)
     sys.stdout.buffer.flush()
@@ -88,10 +88,7 @@ def _execute_plugin(request: dict) -> dict:
         func = getattr(module, func_name)
 
         # Support both sync and async plugin functions
-        if asyncio.iscoroutinefunction(func):
-            result = asyncio.run(func(**kwargs))
-        else:
-            result = func(**kwargs)
+        result = asyncio.run(func(**kwargs)) if asyncio.iscoroutinefunction(func) else func(**kwargs)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 

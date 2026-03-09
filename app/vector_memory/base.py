@@ -8,11 +8,12 @@ backend without changing calling code.
 All operations are async.  Implementations must be safe for
 concurrent use from multiple asyncio tasks.
 """
+
 from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -20,20 +21,22 @@ import numpy as np
 @dataclass
 class VectorRecord:
     """A single vector with its associated metadata."""
+
     id: str
     embedding: np.ndarray
     text: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     score: float = 0.0
 
 
 @dataclass
 class SearchResult:
     """Result of a vector similarity search."""
+
     id: str
     text: str
     score: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class VectorStore(abc.ABC):
@@ -49,7 +52,7 @@ class VectorStore(abc.ABC):
         id: str,
         embedding: np.ndarray,
         text: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Insert a single vector into the store."""
 
@@ -58,27 +61,27 @@ class VectorStore(abc.ABC):
         self,
         query_embedding: np.ndarray,
         top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[SearchResult]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
         """Return the *top_k* most similar vectors."""
 
     @abc.abstractmethod
-    async def delete(self, ids: List[str]) -> int:
+    async def delete(self, ids: list[str]) -> int:
         """Delete vectors by ID.  Returns the count actually removed."""
 
     @abc.abstractmethod
     async def batch_insert(
         self,
-        records: List[VectorRecord],
+        records: list[VectorRecord],
     ) -> int:
         """Bulk-insert multiple vectors.  Returns the count inserted."""
 
     # ── Optional lifecycle hooks ──────────────────────────────────
 
-    async def initialize(self) -> None:
+    async def initialize(self) -> None:  # noqa: B027
         """Called once at startup to create collections / tables."""
 
-    async def close(self) -> None:
+    async def close(self) -> None:  # noqa: B027
         """Release connections, flush buffers."""
 
     async def count(self) -> int:

@@ -1,11 +1,14 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple
+
+import contextlib
+from typing import Any
 
 from app.config.settings import settings
-from app.shared.utils import get_logger, log_event
-from app.orchestrator.context_builder import format_rag_context, build_final_prompt
+from app.orchestrator.context_builder import build_final_prompt, format_rag_context
+from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
+
 
 class ChatPipeline:
     def __init__(self, retriever, memory_service, tool_service=None):
@@ -20,27 +23,25 @@ class ChatPipeline:
         use_rag: bool = True,
         use_web: bool = False,
         rag_top_k: int = 3,
-        system_prompt: Optional[str] = None,
-        memory_vector_context: str = ""
-    ) -> Tuple[str, str, Dict[str, Any]]:
+        system_prompt: str | None = None,
+        memory_vector_context: str = "",
+    ) -> tuple[str, str, dict[str, Any]]:
         rag_hits = []
         rag_citations = []
         rag_context = ""
-        
-        if use_rag and self.retriever:
-            if self.retriever.ensure_loaded():
-                rag_hits = self.retriever.search(question, top_k=rag_top_k)
-                rag_context, rag_citations = format_rag_context(rag_hits)
+
+        if use_rag and self.retriever and self.retriever.ensure_loaded():
+            rag_hits = self.retriever.search(question, top_k=rag_top_k)
+            rag_context, rag_citations = format_rag_context(rag_hits)
 
         web_refs = []
         web_context = ""
         if use_web and self.tool_service:
-            try:
+            with contextlib.suppress(Exception):
                 web_context, web_refs = await self.tool_service.get_web_context(
                     question,
                     max_results=settings.WEB_MAX_RESULTS,
                 )
-            except Exception: pass
 
         memory_block = ""
         if self.memory_service:
@@ -55,14 +56,14 @@ class ChatPipeline:
             web_context=web_context,
             memory_vector_context=memory_vector_context,
             use_rag=use_rag,
-            use_web=use_web
+            use_web=use_web,
         )
 
         context_data = {
             "rag_hits": rag_hits,
             "rag_citations": rag_citations,
             "web_refs": web_refs,
-            "rag_score": float(rag_hits[0]["score"]) if rag_hits else None
+            "rag_score": float(rag_hits[0]["score"]) if rag_hits else None,
         }
-        
+
         return final_prompt, finalized_sys_prompt, context_data

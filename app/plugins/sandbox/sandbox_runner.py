@@ -19,22 +19,24 @@ Security model:
     *accidental* or *opportunistic* abuse.  For truly untrusted code,
     pair this with container isolation.
 """
+
 from __future__ import annotations
 
 import asyncio
 import functools
-import tracemalloc
 import time
+import tracemalloc
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 from app.shared.utils import get_logger
 
 _LOG = get_logger(__name__)
 
 # ─── Module whitelist ─────────────────────────────────────────────
-ALLOWED_MODULES: Set[str] = {
+ALLOWED_MODULES: set[str] = {
     "json",
     "math",
     "re",
@@ -59,7 +61,7 @@ ALLOWED_MODULES: Set[str] = {
 }
 
 # Modules explicitly blocked even if someone tries to sneak them in
-BLOCKED_MODULES: Set[str] = {
+BLOCKED_MODULES: set[str] = {
     "os",
     "sys",
     "subprocess",
@@ -96,7 +98,7 @@ BLOCKED_MODULES: Set[str] = {
 }
 
 # Safe built-in functions exposed to sandboxed code
-SAFE_BUILTINS: Dict[str, Any] = {
+SAFE_BUILTINS: dict[str, Any] = {
     # Types
     "True": True,
     "False": False,
@@ -152,21 +154,24 @@ SAFE_BUILTINS: Dict[str, Any] = {
 @dataclass
 class SandboxResult:
     """Result of a sandboxed plugin execution."""
+
     success: bool = False
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     execution_time_ms: float = 0.0
     peak_memory_bytes: int = 0
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 class SandboxSecurityError(Exception):
     """Raised when a plugin violates sandbox security rules."""
+
     pass
 
 
 class SandboxTimeoutError(Exception):
     """Raised when a plugin exceeds its execution time limit."""
+
     pass
 
 
@@ -184,15 +189,13 @@ class SandboxRunner:
         self,
         default_timeout: float = 5.0,
         memory_limit_mb: float = 50.0,
-        allowed_modules: Optional[Set[str]] = None,
+        allowed_modules: set[str] | None = None,
         max_workers: int = 4,
     ) -> None:
         self.default_timeout = default_timeout
         self.memory_limit_bytes = int(memory_limit_mb * 1024 * 1024)
         self.allowed_modules = allowed_modules or ALLOWED_MODULES
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="plugin_sandbox"
-        )
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="plugin_sandbox")
 
     def _make_safe_import(self) -> Callable:
         """Create a restricted __import__ function."""
@@ -202,19 +205,20 @@ class SandboxRunner:
             # Check top-level module name
             top_module = name.split(".")[0]
             if top_module in BLOCKED_MODULES:
-                raise SandboxSecurityError(
-                    f"Module '{name}' is blocked in the plugin sandbox"
-                )
+                raise SandboxSecurityError(f"Module '{name}' is blocked in the plugin sandbox")
             if top_module not in allowed:
                 raise SandboxSecurityError(
-                    f"Module '{name}' is not in the whitelist. "
-                    f"Allowed: {', '.join(sorted(allowed))}"
+                    f"Module '{name}' is not in the whitelist. Allowed: {', '.join(sorted(allowed))}"
                 )
-            return __builtins__["__import__"](name, *args, **kwargs) if isinstance(__builtins__, dict) else __import__(name, *args, **kwargs)
+            return (
+                __builtins__["__import__"](name, *args, **kwargs)
+                if isinstance(__builtins__, dict)
+                else __import__(name, *args, **kwargs)
+            )
 
         return _safe_import
 
-    def _get_restricted_globals(self) -> Dict[str, Any]:
+    def _get_restricted_globals(self) -> dict[str, Any]:
         """Build the restricted global namespace for sandboxed code."""
         safe = dict(SAFE_BUILTINS)
         safe["__import__"] = self._make_safe_import()
@@ -223,8 +227,8 @@ class SandboxRunner:
     async def execute_plugin(
         self,
         func: Callable[..., Any],
-        args: Optional[Dict[str, Any]] = None,
-        timeout: Optional[float] = None,
+        args: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> SandboxResult:
         """Execute a plugin function within the sandbox.
 
@@ -253,9 +257,7 @@ class SandboxRunner:
 
         try:
             if asyncio.iscoroutinefunction(func):
-                raw = await asyncio.wait_for(
-                    func(**call_args), timeout=effective_timeout
-                )
+                raw = await asyncio.wait_for(func(**call_args), timeout=effective_timeout)
             else:
                 # Run sync function in thread pool with timeout
                 loop = asyncio.get_running_loop()
@@ -267,10 +269,8 @@ class SandboxRunner:
             result.success = True
             result.result = raw
 
-        except asyncio.TimeoutError:
-            result.error = (
-                f"Plugin timed out after {effective_timeout}s"
-            )
+        except TimeoutError:
+            result.error = f"Plugin timed out after {effective_timeout}s"
             _LOG.warning("Sandbox timeout: %s after %.1fs", func.__name__, effective_timeout)
 
         except SandboxSecurityError as e:
@@ -308,12 +308,12 @@ class SandboxRunner:
 
         return result
 
-    def validate_plugin_source(self, source_code: str) -> List[str]:
+    def validate_plugin_source(self, source_code: str) -> list[str]:
         """Static analysis of plugin source for forbidden patterns.
 
         Returns a list of violations found (empty = safe).
         """
-        violations: List[str] = []
+        violations: list[str] = []
 
         for blocked in BLOCKED_MODULES:
             if f"import {blocked}" in source_code or f"from {blocked}" in source_code:

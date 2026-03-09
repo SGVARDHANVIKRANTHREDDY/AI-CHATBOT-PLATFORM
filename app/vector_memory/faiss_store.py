@@ -7,17 +7,15 @@ so that existing code continues to work without Qdrant running.
 This backend stores data on disk (JSON metadata + FAISS binary index).
 It is NOT recommended for production — use QdrantVectorStore instead.
 """
+
 from __future__ import annotations
 
 import json
 import time
-import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import faiss
 import numpy as np
-
 from app.config.settings import settings
 from app.shared.utils import get_logger
 from app.vector_memory.base import SearchResult, VectorRecord, VectorStore
@@ -46,8 +44,8 @@ class FAISSVectorStore(VectorStore):
         self.faiss_path = self.index_dir / "memory.index"
         self.meta_path = self.index_dir / "memory_meta.json"
 
-        self._index: Optional[faiss.Index] = None
-        self._records: List[Dict[str, Any]] = []
+        self._index: faiss.Index | None = None
+        self._records: list[dict[str, Any]] = []
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -61,7 +59,7 @@ class FAISSVectorStore(VectorStore):
         if self.faiss_path.exists() and self.meta_path.exists():
             try:
                 self._index = faiss.read_index(str(self.faiss_path))
-                with open(self.meta_path, "r", encoding="utf-8") as f:
+                with open(self.meta_path, encoding="utf-8") as f:
                     self._records = json.load(f)
                 _LOG.info(
                     "FAISS store '%s' loaded: %d vectors",
@@ -88,25 +86,27 @@ class FAISSVectorStore(VectorStore):
         id: str,
         embedding: np.ndarray,
         text: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         emb = np.asarray(embedding, dtype="float32").reshape(1, -1)
         if self._index is None:
             self._index = faiss.IndexFlatIP(emb.shape[1])
         self._index.add(emb)
-        self._records.append({
-            "id": id,
-            "text": text,
-            "metadata": metadata or {},
-        })
+        self._records.append(
+            {
+                "id": id,
+                "text": text,
+                "metadata": metadata or {},
+            }
+        )
         self._save()
 
     async def search(
         self,
         query_embedding: np.ndarray,
         top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[SearchResult]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
         if self._index is None or not self._records:
             return []
 
@@ -115,8 +115,8 @@ class FAISSVectorStore(VectorStore):
         k = min(len(self._records), top_k)
         scores, idxs = self._index.search(q, k)
 
-        results: List[SearchResult] = []
-        for score, idx in zip(scores[0], idxs[0]):
+        results: list[SearchResult] = []
+        for score, idx in zip(scores[0], idxs[0], strict=False):
             if idx == -1 or idx >= len(self._records):
                 continue
             rec = self._records[idx]
@@ -139,7 +139,7 @@ class FAISSVectorStore(VectorStore):
         _emit_search_metric(time.perf_counter() - start)
         return results
 
-    async def delete(self, ids: List[str]) -> int:
+    async def delete(self, ids: list[str]) -> int:
         """Delete by rebuilding the index without the given IDs.
 
         FAISS IndexFlatIP does not support in-place deletion, so we
@@ -170,23 +170,23 @@ class FAISSVectorStore(VectorStore):
         self._save()
         return removed
 
-    async def batch_insert(self, records: List[VectorRecord]) -> int:
+    async def batch_insert(self, records: list[VectorRecord]) -> int:
         if not records:
             return 0
 
-        embeddings = np.stack(
-            [np.asarray(r.embedding, dtype="float32") for r in records]
-        )
+        embeddings = np.stack([np.asarray(r.embedding, dtype="float32") for r in records])
         if self._index is None:
             self._index = faiss.IndexFlatIP(embeddings.shape[1])
         self._index.add(embeddings)
 
         for rec in records:
-            self._records.append({
-                "id": rec.id,
-                "text": rec.text,
-                "metadata": rec.metadata,
-            })
+            self._records.append(
+                {
+                    "id": rec.id,
+                    "text": rec.text,
+                    "metadata": rec.metadata,
+                }
+            )
         self._save()
         return len(records)
 
@@ -199,6 +199,7 @@ class FAISSVectorStore(VectorStore):
 def _emit_search_metric(duration: float) -> None:
     try:
         from app.shared.monitoring import VECTOR_QUERY_LATENCY
+
         VECTOR_QUERY_LATENCY.observe(duration)
-    except Exception:
+    except Exception:  # noqa: S110
         pass

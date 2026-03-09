@@ -20,16 +20,15 @@ Design rationale:
     LRU eviction prevents unbounded memory growth while keeping the
     hottest queries warm.
 """
+
 from __future__ import annotations
 
 import hashlib
-import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import redis.asyncio as redis
-
 from app.config.settings import settings
 from app.shared.monitoring import (
     SEMANTIC_CACHE_HITS,
@@ -42,10 +41,10 @@ from app.shared.utils import get_logger
 _LOG = get_logger(__name__)
 
 # Redis key prefixes
-_PREFIX_EMB = "semcache:emb:"      # hash → embedding bytes
-_PREFIX_RESP = "semcache:resp:"    # hash → response text
-_PREFIX_TS = "semcache:ts:"        # hash → last-access timestamp
-_INDEX_KEY = "semcache:index"      # sorted set (score = last-access ts)
+_PREFIX_EMB = "semcache:emb:"  # hash → embedding bytes
+_PREFIX_RESP = "semcache:resp:"  # hash → response text
+_PREFIX_TS = "semcache:ts:"  # hash → last-access timestamp
+_INDEX_KEY = "semcache:index"  # sorted set (score = last-access ts)
 
 
 class SemanticCache:
@@ -66,9 +65,7 @@ class SemanticCache:
         self.threshold = threshold
         self.max_entries = max_entries
         self.ttl = ttl
-        self._redis: redis.Redis = redis.from_url(
-            settings.REDIS_URL, decode_responses=False
-        )
+        self._redis: redis.Redis = redis.from_url(settings.REDIS_URL, decode_responses=False)
         self._model: Any = None
 
     # ── Embedding helpers ─────────────────────────────────────────
@@ -76,6 +73,7 @@ class SemanticCache:
     def _get_model(self) -> Any:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
+
             self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
         return self._model
 
@@ -90,7 +88,7 @@ class SemanticCache:
 
     # ── Core API ──────────────────────────────────────────────────
 
-    async def get(self, query: str) -> Optional[str]:
+    async def get(self, query: str) -> str | None:
         """Look up a semantically similar cached response.
 
         Returns the response string on hit, ``None`` on miss.
@@ -109,18 +107,18 @@ class SemanticCache:
             return None
 
         best_score = -1.0
-        best_key: Optional[str] = None
+        best_key: str | None = None
 
         # Pipeline: fetch all embeddings in one round-trip
         pipe = self._redis.pipeline(transaction=False)
-        decoded_members: List[str] = []
+        decoded_members: list[str] = []
         for m in members:
             key = m.decode("utf-8") if isinstance(m, bytes) else m
             decoded_members.append(key)
             pipe.get(f"{_PREFIX_EMB}{key}")
         raw_embs = await pipe.execute()
 
-        for key, raw in zip(decoded_members, raw_embs):
+        for key, raw in zip(decoded_members, raw_embs, strict=False):
             if raw is None:
                 continue
             cached_emb = np.frombuffer(raw, dtype="float32")
@@ -139,9 +137,7 @@ class SemanticCache:
                 await self._redis.set(f"{_PREFIX_TS}{best_key}", str(now))
 
                 response = raw_resp.decode("utf-8") if isinstance(raw_resp, bytes) else raw_resp
-                _LOG.info(
-                    "Semantic cache HIT (score=%.4f, key=%s)", best_score, best_key
-                )
+                _LOG.info("Semantic cache HIT (score=%.4f, key=%s)", best_score, best_key)
                 SEMANTIC_CACHE_HITS.labels(status="hit").inc()
                 SEMANTIC_CACHE_LLM_SAVINGS.inc()
                 SEMANTIC_CACHE_LATENCY.observe(time.perf_counter() - t0)
@@ -227,4 +223,3 @@ class SemanticCache:
         pipe.zrem(_INDEX_KEY, key)
         results = await pipe.execute()
         return any(results)
-

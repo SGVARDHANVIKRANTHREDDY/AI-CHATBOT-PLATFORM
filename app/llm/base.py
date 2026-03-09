@@ -1,17 +1,21 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterator, List, Optional, Union
+from collections.abc import AsyncIterator
+
 
 class LLMProvider(ABC):
     """Abstract base class for all LLM providers."""
-    
+
     @abstractmethod
-    async def ask(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
+    async def ask(self, prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
         """Asynchronous chat completion."""
         pass
 
     @abstractmethod
-    async def ask_stream(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> AsyncIterator[str]:
+    async def ask_stream(
+        self, prompt: str, system_prompt: str | None = None, model: str | None = None
+    ) -> AsyncIterator[str]:
         """Asynchronous streaming chat completion."""
         pass
 

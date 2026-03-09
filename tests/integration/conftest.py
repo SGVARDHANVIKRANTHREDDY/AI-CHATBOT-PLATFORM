@@ -1,11 +1,8 @@
 """Integration test fixtures — shared state isolation."""
+
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
-
 from app.config.settings import settings
 
 _EVOLUTION_PATH = settings.DATA_DIR / "prompts" / "evolution.json"
