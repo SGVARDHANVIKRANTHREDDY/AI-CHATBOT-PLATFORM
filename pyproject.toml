@@ -40,6 +40,7 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
+line-ending = "lf"
 
 # ── mypy ──────────────────────────────────────────────────────────
 [tool.mypy]
