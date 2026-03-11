@@ -4,8 +4,7 @@
 ![CI/CD Pipeline](https://github.com/SGVARDHANVIKRANTHREDDY/AI-CHATBOT-PLATFORM/actions/workflows/ci-cd.yml/badge.svg)
 [![CI/CD Pipeline](https://github.com/SGVARDHANVIKRANTHREDDY/AI-CHATBOT-PLATFORM/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/SGVARDHANVIKRANTHREDDY/AI-CHATBOT-PLATFORM/actions/workflows/ci-cd.yml)
 > [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 ---
 
 ## Table of Contents
