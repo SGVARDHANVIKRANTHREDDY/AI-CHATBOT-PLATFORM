@@ -2,8 +2,8 @@
 
 > A production-grade, privacy-first, multi-agent AI assistant with RAG retrieval, knowledge graphs, semantic caching, prompt evolution, and enterprise reliability primitives.
 ![CI/CD Pipeline](https://github.com/SGVARDHANVIKRANTHREDDY/AI-CHATBOT-PLATFORM/actions/workflows/ci-cd.yml/badge.svg)
-[![CI/CD Pipeline](https://github.com/your-org/chatbot/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/your-org/chatbot/actions/workflows/ci-cd.yml)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
+[![CI/CD Pipeline](https://github.com/SGVARDHANVIKRANTHREDDY/AI-CHATBOT-PLATFORM/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/SGVARDHANVIKRANTHREDDY/AI-CHATBOT-PLATFORM/actions/workflows/ci-cd.yml)
+> [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
